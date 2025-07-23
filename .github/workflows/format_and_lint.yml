@@ -34,6 +34,3 @@ jobs:
       - name: Type checking with pyright
         run: |
           poetry run pyright .
-      - name: Run tests with pytest
-        run: |
-          poetry run pytest

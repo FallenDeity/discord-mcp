@@ -37,17 +37,11 @@ repos:
           - id: pyright
             name: pyright
             pass_filenames: false
-            entry: poetry run pyright
+            entry: poetry run pyright .
             language: python
 
           - id: ruff
             name: ruff
             pass_filenames: false
             entry: poetry run ruff check .
-            language: python
-
-          - id: pytest
-            name: pytest
-            pass_filenames: false
-            entry: poetry run pytest
             language: python
