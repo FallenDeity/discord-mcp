@@ -1,9 +1,18 @@
 import logging
+import typing as t
+from types import TracebackType
 
 logger = logging.getLogger(__name__)
 
 
-def foo():
-    logger.info("This is an info message from foo.")
-    logger.debug("This is a debug message from foo.")
-    logger.warning("This is a warning message from foo.")
+class BotProtocol(t.Protocol):
+    async def __aenter__(self) -> "BotProtocol": ...
+
+    async def __aexit__(
+        self,
+        exc_type: t.Optional[type[BaseException]],
+        exc_val: t.Optional[BaseException],
+        exc_tb: t.Optional[TracebackType],
+    ) -> None: ...
+
+    async def run(self) -> None: ...

@@ -45,10 +45,10 @@ class StructuredJsonFormatter(pythonjsonlogger.json.JsonFormatter):
 
     def __init__(
         self,
+        *args: t.Any,
         fmt: str = "%(asctime)s %(name)s %(pathname)s %(funcName)s %(lineno)s %(levelname)s %(message)s",
         datefmt: str = "%Y-%m-%d %H:%M:%S",
         style: str = "%",
-        *args: t.Any,
         json_default: t.Callable[..., t.Any] | str | None = None,
         json_encoder: t.Callable[..., t.Any] | str | None = None,
         json_serializer: t.Callable[..., t.Any] | str = json.dumps,
@@ -58,16 +58,16 @@ class StructuredJsonFormatter(pythonjsonlogger.json.JsonFormatter):
         **kwargs: t.Any,
     ) -> None:
         super().__init__(
+            *args,
+            **kwargs,
             fmt=fmt,
             datefmt=datefmt,
             style=style,
-            *args,
             json_default=json_default,
             json_encoder=json_encoder,
             json_serializer=json_serializer,
             json_indent=json_indent,
             json_ensure_ascii=json_ensure_ascii,
-            **kwargs,
         )
         self.use_colors = use_colors
 
@@ -95,8 +95,6 @@ class StructuredJsonFormatter(pythonjsonlogger.json.JsonFormatter):
 class DailyRotatingFileHandler(RotatingFileHandler):
     """A file handler that writes log messages to a file."""
 
-    _last_entry: datetime.datetime = datetime.datetime.today()
-
     def __init__(
         self,
         filename: str | os.PathLike[str],
@@ -109,6 +107,7 @@ class DailyRotatingFileHandler(RotatingFileHandler):
         *,
         folder: pathlib.Path | str = "logs",
     ) -> None:
+        self._last_entry = datetime.datetime.today()
         self.folder = pathlib.Path(folder)
         self.filename = filename
         self.folder.mkdir(exist_ok=True)
@@ -135,7 +134,12 @@ class DailyRotatingFileHandler(RotatingFileHandler):
         super().emit(record)
 
 
-def setup_logging(level: int = logging.DEBUG, file_logging: bool = False, filename: str = "discord-mcp") -> None:
+def setup_logging(
+    level: int = logging.DEBUG,
+    file_logging: bool = False,
+    filename: str = "discord-mcp",
+    log_dir: str | pathlib.Path = "logs",
+) -> None:
     """
     Setup logging configuration for the entire application.
 
@@ -147,9 +151,12 @@ def setup_logging(level: int = logging.DEBUG, file_logging: bool = False, filena
         Whether to enable file logging.
     filename : str
         The base filename for log files if file logging is enabled.
+    log_dir : str
+        The directory where log files will be stored.
     """
     # Get the root logger
-    root_logger = logging.getLogger(__name__.partition(".")[0])
+    package_name = __name__.split(".")[0]
+    root_logger = logging.getLogger(package_name)
 
     # Clear any existing handlers
     root_logger.handlers.clear()
@@ -166,7 +173,7 @@ def setup_logging(level: int = logging.DEBUG, file_logging: bool = False, filena
 
     # Create file handler if requested
     if file_logging:
-        file_handler = DailyRotatingFileHandler(filename=filename, folder="logs")
+        file_handler = DailyRotatingFileHandler(filename=filename, folder=log_dir)
         file_handler.setLevel(level)
         file_handler.addFilter(RelativePathFilter())
         root_logger.addHandler(file_handler)

@@ -13,6 +13,8 @@ packages = [
 python = "^3.12"
 python-json-logger = "^3.3.0"
 pytest = "^8.4.1"
+click = "^8.2.1"
+mcp = "^1.12.1"
 
 
 [tool.poetry.group.dev.dependencies]
