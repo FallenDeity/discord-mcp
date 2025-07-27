@@ -1,14 +1,26 @@
+import asyncio
 import importlib.metadata
 import logging
+import pathlib
 import platform
 import sys
-from pathlib import Path
 
 import click
 
-from discord_mcp.core.server import run_server
+from discord_mcp.core.bot import Bot
+from discord_mcp.core.server.http_server import run_server as run_http_server
+from discord_mcp.core.server.stdio_server import run_server as run_stdio_server
+from discord_mcp.utils.enums import ServerType
 from discord_mcp.utils.exceptions import handle_exception
-from discord_mcp.utils.logger import setup_logging
+from discord_mcp.utils.logger import setup_all_logging  # , setup_logging
+
+__all__: tuple[str, ...] = (
+    "cli",
+    "cli_main",
+    "get_version",
+    "show_version",
+)
+
 
 # Set the exception hook to handle uncaught exceptions
 sys.excepthook = handle_exception
@@ -28,7 +40,8 @@ def get_version() -> str:
 @click.option("--debug", is_flag=True, help="Enable debug logging")
 @click.option("--file-logging", is_flag=True, help="Enable file logging")
 @click.option("--filename", default="discord-mcp", help="Log file name")
-@click.option("--log-dir", type=click.Path(path_type=Path), default="logs", help="Log directory")
+@click.option("--log-dir", type=click.Path(path_type=pathlib.Path), default="logs", help="Log directory")
+@click.option("--server-type", type=click.Choice(ServerType), default=ServerType.STDIO, help="Server type to run")
 @click.option("--version", is_flag=True, help="Show version information")
 @click.pass_context
 def cli(
@@ -36,18 +49,20 @@ def cli(
     debug: bool,
     file_logging: bool,
     filename: str,
-    log_dir: Path,
+    log_dir: pathlib.Path,
+    server_type: str,
     version: bool,
 ) -> None:
     """Discord MCP CLI - A Model Context Protocol server for Discord integration."""
 
     # Setup logging early
-    setup_logging(
-        level=logging.DEBUG if debug else logging.INFO,
-        file_logging=file_logging,
-        filename=filename,
-        log_dir=log_dir,
-    )
+    # setup_logging(
+    #     level=logging.DEBUG if debug else logging.INFO,
+    #     file_logging=file_logging,
+    #     filename=filename,
+    #     log_dir=log_dir,
+    # )
+    setup_all_logging()
 
     if version:
         show_version()
@@ -57,11 +72,18 @@ def cli(
     if ctx.invoked_subcommand is None:
         logger.info("Starting discord-mcp CLI")
         logger.debug("Debug logging is enabled" if debug else "Debug logging is disabled")
+        logger.info(f"Server type: {server_type}")
 
-        # TODO: Add more CLI commands and functionality here
-        logger.warning("CLI is running. Add your commands here.")
+        # Create the bot instance
+        bot = Bot(logging_level=logging.DEBUG if debug else logging.INFO, file_logging=file_logging)
 
-        run_server()
+        # Run the appropriate server based on server_type
+        if server_type == ServerType.HTTP:
+            logger.info("Starting HTTP server")
+            run_http_server(bot)
+        else:
+            logger.info("Starting stdio server")
+            asyncio.run(run_stdio_server(bot))
 
 
 def show_version() -> None:

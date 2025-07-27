@@ -72,9 +72,11 @@ class StructuredJsonFormatter(pythonjsonlogger.json.JsonFormatter):
         self.use_colors = use_colors
 
     def format(self, record: logging.LogRecord) -> str:
+        record.levelname = f"{LogLevelColors.from_level(record.levelname)}{record.levelname}{LogLevelColors.ENDC}"
+        formatted = super().format(record)
         if self.use_colors:
-            return f"{LogLevelColors.from_level(record.levelname)}{super().format(record)}{LogLevelColors.ENDC}"
-        return super().format(record)
+            return formatted.replace("\\u001b", "\033").replace("\u001b", "\033")
+        return formatted
 
     def add_fields(
         self, log_record: t.Dict[str, t.Any], record: logging.LogRecord, message_dict: t.Dict[str, t.Any]
@@ -121,6 +123,7 @@ class DailyRotatingFileHandler(RotatingFileHandler):
             errors=errors,
         )
         self.setFormatter(StructuredJsonFormatter(use_colors=False))
+        self.addFilter(RelativePathFilter())
 
     def emit(self, record: logging.LogRecord) -> None:
         """Emit a log record."""
@@ -135,6 +138,7 @@ class DailyRotatingFileHandler(RotatingFileHandler):
 
 
 def setup_logging(
+    package_name: str = __name__.split(".")[0],
     level: int = logging.DEBUG,
     file_logging: bool = False,
     filename: str = "discord-mcp",
@@ -155,7 +159,6 @@ def setup_logging(
         The directory where log files will be stored.
     """
     # Get the root logger
-    package_name = __name__.split(".")[0]
     root_logger = logging.getLogger(package_name)
 
     # Clear any existing handlers
@@ -175,5 +178,45 @@ def setup_logging(
     if file_logging:
         file_handler = DailyRotatingFileHandler(filename=filename, folder=log_dir)
         file_handler.setLevel(level)
-        file_handler.addFilter(RelativePathFilter())
         root_logger.addHandler(file_handler)
+
+
+LOGGING_CONFIG = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "filters": {
+        "relative_path": {"()": RelativePathFilter},
+    },
+    "formatters": {
+        "json_colored": {"()": StructuredJsonFormatter, "use_colors": True},
+        "json_plain": {"()": StructuredJsonFormatter, "use_colors": False},
+    },
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+            "level": "DEBUG",
+            "formatter": "json_colored",
+            "filters": ["relative_path"],
+            "stream": "ext://sys.stdout",
+        },
+        "file": {
+            "()": DailyRotatingFileHandler,
+            "level": "DEBUG",
+            "formatter": "json_plain",
+            "filename": "discord-mcp",
+            "folder": "logs",
+        },
+    },
+    "loggers": {
+        "": {"handlers": ["console", "file"], "level": "DEBUG", "propagate": False},
+        "discord": {"handlers": ["console", "file"], "level": "INFO", "propagate": False},
+        "uvicorn.error": {"handlers": ["console", "file"], "level": "INFO", "propagate": False},
+        "uvicorn.access": {"handlers": ["console", "file"], "level": "INFO", "propagate": False},
+    },
+}
+
+
+def setup_all_logging():
+    import logging.config
+
+    logging.config.dictConfig(LOGGING_CONFIG)
