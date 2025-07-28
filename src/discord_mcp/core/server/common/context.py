@@ -1,73 +1,96 @@
 from __future__ import annotations
 
 import asyncio
+import collections
 import contextlib
 import logging
 import typing as t
-from types import TracebackType
 
 import attrs
+from mcp.server.fastmcp import Context
+from mcp.server.session import ServerSession
 
 if t.TYPE_CHECKING:
-    from mcp.server.lowlevel import Server
-    from starlette.applications import Starlette
-
     from discord_mcp.core.bot import Bot
+    from discord_mcp.core.server.mcp_server import DiscordMCPStarletteApp, STDIODiscordMCPServer
+
+
+__all__: tuple[str, ...] = (
+    "DiscordMCPLifespanResult",
+    "DiscordMCPContext",
+    "starlette_lifespan",
+    "stdio_lifespan",
+)
 
 
 logger = logging.getLogger(__name__)
 
 
 @attrs.define
-class ServerContext:
+class DiscordMCPLifespanResult(collections.UserDict[str, t.Any]):
     bot: Bot
 
+    def __attrs_post_init__(self) -> None:
+        self.data = attrs.asdict(self, recurse=True)
 
-class ServerLifespan:
-    def __init__(self, server: Server[ServerContext, t.Any]) -> None:
-        self._server = server
-        self._bot = t.cast("Bot", server.bot)  # type: ignore
-        self._bot_task: asyncio.Task[None] | None = None
+    def __str__(self) -> str:
+        return f"{self.__class__.__name__}(data={self.data})"
 
-    async def __aenter__(self) -> ServerContext:
-        await self._bot.login(str(self._bot.environment.DISCORD_TOKEN))
-        self._bot_task = asyncio.create_task(self._bot.connect())
-        await self._bot.wait_until_ready()
-        return ServerContext(bot=self._bot)
 
-    async def __aexit__(
-        self,
-        exc_type: t.Optional[type[BaseException]],
-        exc_value: t.Optional[BaseException],
-        traceback: t.Optional[TracebackType],
-    ) -> None:
-        if self._bot_task:
-            self._bot_task.cancel()
-        return await self._bot.close()
+class DiscordMCPContext(Context[ServerSession, DiscordMCPLifespanResult, t.Any]): ...
 
 
 @contextlib.asynccontextmanager
-async def lifespan(app: Starlette) -> t.AsyncIterator[None]:
-    session_manager = app.session_manager  # type: ignore
-    bot = t.cast("Bot", app.bot)  # type: ignore
+async def starlette_lifespan(app: DiscordMCPStarletteApp) -> t.AsyncIterator[DiscordMCPLifespanResult]:
+    if not app.session_manager:
+        raise RuntimeError("Session manager is not initialized, cannot run lifespan context")
 
-    # Start Streamable session manager
-    async with session_manager.run():
-        logger.info("Session manager running-MCP transport ready")
+    logger.info("Starting application with StreamableHTTP session manager...")
 
-        await bot.login(str(bot.environment.DISCORD_TOKEN))
-        _bot_task = asyncio.create_task(bot.connect())
+    async with app.session_manager.run():
+        logger.info("Application started with StreamableHTTP session manager!")
 
-        # Wait for bot ready
-        await bot.wait_until_ready()
-        logger.info(f"Discord bot connected as {bot.user}")
-
+        await app.bot.login(str(app.bot.environment.DISCORD_TOKEN))
+        _bot_task = asyncio.create_task(app.bot.connect())
         try:
-            yield  # now accepting both HTTP sessions & Discord bot commands
+            await app.bot.wait_until_ready()
+            logger.info(f"Discord bot connected as {app.bot.user}")
+            yield DiscordMCPLifespanResult(bot=app.bot)
         finally:
-            logger.info("Shutting down Discord bot …")
-            # Cancel background task if exists
+            logger.info("Application shutting down...")
+
             if _bot_task:
                 _bot_task.cancel()
-            await bot.close()
-            logger.info("Lifespan teardown complete")
+                try:
+                    await _bot_task
+                except asyncio.CancelledError:
+                    pass
+                except Exception as e:
+                    logger.error(f"Error during bot shutdown: {e}")
+            await app.bot.close()
+
+            logger.info("Application shutdown complete.")
+
+
+@contextlib.asynccontextmanager
+async def stdio_lifespan(app: STDIODiscordMCPServer) -> t.AsyncIterator[DiscordMCPLifespanResult]:
+    await app.bot.login(str(app.bot.environment.DISCORD_TOKEN))
+    _bot_task = asyncio.create_task(app.bot.connect())
+    try:
+        await app.bot.wait_until_ready()
+        logger.info(f"Discord bot connected as {app.bot.user}")
+        yield DiscordMCPLifespanResult(bot=app.bot)
+    finally:
+        logger.info("Application shutting down...")
+
+        if _bot_task:
+            _bot_task.cancel()
+            try:
+                await _bot_task
+            except asyncio.CancelledError:
+                pass
+            except Exception as e:
+                logger.error(f"Error during bot shutdown: {e}")
+        await app.bot.close()
+
+        logger.info("Application shutdown complete.")
