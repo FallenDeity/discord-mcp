@@ -11,6 +11,8 @@ To test the mcp server, there are two main methods:
 
 ### STDIO Server
 
+<img width="1250" height="1000" alt="image" src="https://github.com/user-attachments/assets/2f705e95-213d-4322-88db-a25dba6bb0ab" />
+
 ```pwsh
 code $env:APPDATA\Claude\claude_desktop_config.json
 ```
