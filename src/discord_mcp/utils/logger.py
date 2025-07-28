@@ -1,7 +1,10 @@
+import contextlib
+import contextvars
 import datetime
 import enum
 import json
 import logging
+import logging.config
 import os
 import pathlib
 import traceback
@@ -16,7 +19,10 @@ __all__: tuple[str, ...] = (
     "DailyRotatingFileHandler",
     "StructuredJsonFormatter",
     "setup_logging",
+    "add_to_log_context",
 )
+
+_request_context: contextvars.ContextVar[dict[str, t.Any]] = contextvars.ContextVar("request_context", default={})
 
 
 class LogLevelColors(enum.StrEnum):
@@ -37,6 +43,14 @@ class LogLevelColors(enum.StrEnum):
 class RelativePathFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
         record.pathname = record.pathname.replace(os.getcwd(), "~")
+        return True
+
+
+class ContextFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        context = _request_context.get()
+        for key, value in context.items():
+            setattr(record, key, value)
         return True
 
 
@@ -124,6 +138,7 @@ class DailyRotatingFileHandler(RotatingFileHandler):
         )
         self.setFormatter(StructuredJsonFormatter(use_colors=False))
         self.addFilter(RelativePathFilter())
+        self.addFilter(ContextFilter())
 
     def emit(self, record: logging.LogRecord) -> None:
         """Emit a log record."""
@@ -138,85 +153,91 @@ class DailyRotatingFileHandler(RotatingFileHandler):
 
 
 def setup_logging(
-    package_name: str = __name__.split(".")[0],
-    level: int = logging.DEBUG,
-    file_logging: bool = False,
+    log_level: int = logging.DEBUG,
+    file_logging: bool = True,
     filename: str = "discord-mcp",
     log_dir: str | pathlib.Path = "logs",
 ) -> None:
     """
-    Setup logging configuration for the entire application.
-
-    Parameters
-    ----------
-    level : int
-        The logging level to use.
-    file_logging : bool
-        Whether to enable file logging.
-    filename : str
-        The base filename for log files if file logging is enabled.
-    log_dir : str
-        The directory where log files will be stored.
+    Set up structured logging for console and file handlers.
     """
-    # Get the root logger
-    root_logger = logging.getLogger(package_name)
-
-    # Clear any existing handlers
-    root_logger.handlers.clear()
-
-    # Set the level
-    root_logger.setLevel(level)
-
-    # Create console handler
-    console_handler = logging.StreamHandler()
-    console_handler.setLevel(level)
-    console_handler.addFilter(RelativePathFilter())
-    console_handler.setFormatter(StructuredJsonFormatter())
-    root_logger.addHandler(console_handler)
-
-    # Create file handler if requested
-    if file_logging:
-        file_handler = DailyRotatingFileHandler(filename=filename, folder=log_dir)
-        file_handler.setLevel(level)
-        root_logger.addHandler(file_handler)
-
-
-LOGGING_CONFIG = {
-    "version": 1,
-    "disable_existing_loggers": False,
-    "filters": {
-        "relative_path": {"()": RelativePathFilter},
-    },
-    "formatters": {
-        "json_colored": {"()": StructuredJsonFormatter, "use_colors": True},
-        "json_plain": {"()": StructuredJsonFormatter, "use_colors": False},
-    },
-    "handlers": {
+    handlers: dict[str, dict[str, t.Any]] = {
         "console": {
             "class": "logging.StreamHandler",
-            "level": "DEBUG",
+            "level": log_level,
             "formatter": "json_colored",
-            "filters": ["relative_path"],
-            "stream": "ext://sys.stdout",
+            "filters": ["relative_path", "context_filter"],
+            "stream": "ext://sys.stderr",
         },
-        "file": {
+    }
+
+    if file_logging:
+        handlers["file"] = {
             "()": DailyRotatingFileHandler,
-            "level": "DEBUG",
+            "level": log_level,
             "formatter": "json_plain",
-            "filename": "discord-mcp",
-            "folder": "logs",
+            "filename": filename,
+            "folder": str(log_dir),
+        }
+
+    logging_config = {
+        "version": 1,
+        "disable_existing_loggers": False,
+        "filters": {
+            "relative_path": {
+                "()": RelativePathFilter,
+            },
+            "context_filter": {
+                "()": ContextFilter,
+            },
         },
-    },
-    "loggers": {
-        "": {"handlers": ["console", "file"], "level": "DEBUG", "propagate": False},
-        "discord": {"handlers": ["console", "file"], "level": "INFO", "propagate": False},
-        "uvicorn.error": {"handlers": ["console", "file"], "level": "INFO", "propagate": False},
-        "uvicorn.access": {"handlers": ["console", "file"], "level": "INFO", "propagate": False},
-    },
-}
+        "formatters": {
+            "json_colored": {
+                "()": StructuredJsonFormatter,
+                "use_colors": True,
+            },
+            "json_plain": {
+                "()": StructuredJsonFormatter,
+                "use_colors": False,
+            },
+        },
+        "handlers": handlers,
+        "loggers": {
+            "": {
+                "handlers": list(handlers.keys()),
+                "level": log_level,
+                "propagate": False,
+            },
+            "uvicorn.error": {
+                "handlers": list(handlers.keys()),
+                "level": "INFO",
+                "propagate": False,
+            },
+            "uvicorn.access": {
+                "handlers": list(handlers.keys()),
+                "level": "INFO",
+                "propagate": False,
+            },
+            "discord": {
+                "handlers": list(handlers.keys()),
+                "level": "INFO",
+                "propagate": False,
+            },
+        },
+    }
+
+    logging.config.dictConfig(logging_config)
 
 
-def setup_all_logging():
-    import logging.config
+@contextlib.contextmanager
+def add_to_log_context(**kwargs: t.Any) -> t.Iterator[None]:
+    current_context = _request_context.get()
+    new_context = {**current_context, **kwargs}
 
-    logging.config.dictConfig(LOGGING_CONFIG)
+    # Set the new context and get the token for restoration
+    token = _request_context.set(new_context)
+
+    try:
+        yield
+    finally:
+        _request_context.reset(token)

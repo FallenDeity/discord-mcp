@@ -12,7 +12,7 @@ from discord_mcp.core.server.http_server import run_server as run_http_server
 from discord_mcp.core.server.stdio_server import run_server as run_stdio_server
 from discord_mcp.utils.enums import ServerType
 from discord_mcp.utils.exceptions import handle_exception
-from discord_mcp.utils.logger import setup_all_logging  # , setup_logging
+from discord_mcp.utils.logger import setup_logging
 
 __all__: tuple[str, ...] = (
     "cli",
@@ -56,13 +56,12 @@ def cli(
     """Discord MCP CLI - A Model Context Protocol server for Discord integration."""
 
     # Setup logging early
-    # setup_logging(
-    #     level=logging.DEBUG if debug else logging.INFO,
-    #     file_logging=file_logging,
-    #     filename=filename,
-    #     log_dir=log_dir,
-    # )
-    setup_all_logging()
+    setup_logging(
+        log_level=logging.DEBUG if debug else logging.INFO,
+        file_logging=file_logging,
+        filename=filename,
+        log_dir=log_dir,
+    )
 
     if version:
         show_version()
@@ -75,7 +74,7 @@ def cli(
         logger.info(f"Server type: {server_type}")
 
         # Create the bot instance
-        bot = Bot(logging_level=logging.DEBUG if debug else logging.INFO, file_logging=file_logging)
+        bot = Bot()
 
         # Run the appropriate server based on server_type
         if server_type == ServerType.HTTP:
