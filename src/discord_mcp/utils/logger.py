@@ -20,6 +20,29 @@ __all__: tuple[str, ...] = (
     "add_to_log_context",
 )
 
+BASE_DICT_ATTRS: tuple[str, ...] = (
+    "name",
+    "msg",
+    "args",
+    "levelname",
+    "levelno",
+    "pathname",
+    "filename",
+    "module",
+    "exc_info",
+    "exc_text",
+    "stack_info",
+    "lineno",
+    "funcName",
+    "created",
+    "msecs",
+    "relativeCreated",
+    "thread",
+    "threadName",
+    "processName",
+    "process",
+    "taskName",
+)
 _request_context: contextvars.ContextVar[dict[str, t.Any]] = contextvars.ContextVar("request_context", default={})
 
 
@@ -52,30 +75,6 @@ class ContextFilter(logging.Filter):
         return True
 
 
-BASE_DICT_ATTRS: tuple[str, ...] = (
-    "name",
-    "msg",
-    "args",
-    "levelname",
-    "levelno",
-    "pathname",
-    "filename",
-    "module",
-    "exc_info",
-    "exc_text",
-    "stack_info",
-    "lineno",
-    "funcName",
-    "created",
-    "msecs",
-    "relativeCreated",
-    "thread",
-    "threadName",
-    "processName",
-    "process",
-)
-
-
 def pass_args(args: list[t.Any], msg: str) -> str:
     msg = str(msg)
     if args:
@@ -102,7 +101,7 @@ class JSONFormatter(logging.Formatter):
                 else f"{LogLevelColors.from_level(record.levelname)}{record.levelname}{LogLevelColors.ENDC}"
             ),
             "name": f"{record.name}",
-            "logLocation": f"{record.name}.{record.funcName}:{record.lineno}",
+            "log_location": f"{record.name}.{record.funcName}:{record.lineno}",
             "message": record.getMessage(),
         }
         if record.exc_info:
@@ -118,7 +117,7 @@ class JSONFormatter(logging.Formatter):
                 # this is needed because uvicorn passes some extra colored messages
                 # we can use this too ig
                 if attr == "color_message" and self.use_colors:
-                    json_log[attr] = pass_args(record.args, getattr(record, attr))  # type: ignore
+                    json_log["message"] = pass_args(record.args, getattr(record, attr))  # type: ignore
                 elif attr == "color_message" and not self.use_colors:
                     pass  # not add color_message if colors are disabled (reduces redundancy in logs)
                 else:
