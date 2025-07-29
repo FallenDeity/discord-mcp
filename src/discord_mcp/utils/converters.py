@@ -17,7 +17,6 @@ def convert_name_to_title(name: str) -> str:
 
 
 def add_description_to_annotation(ann: t.Any, default: t.Any, description: str) -> t.Tuple[t.Any, t.Any]:
-    """Merge description into annotation or default if Field is present."""
     # Case 1: Annotated[ann, Field(...)]
     if t.get_origin(ann) is t.Annotated:
         base, *extras = t.get_args(ann)
@@ -47,7 +46,7 @@ def add_description_to_annotation(ann: t.Any, default: t.Any, description: str) 
 
 
 def transform_function_signature(fn: t.Callable[..., t.Any]) -> t.Callable[..., t.Any]:
-    """Transform a function signature to include pydantic validation."""
+    """Transform a function's signature to include type hints and docstring descriptions from the docstring."""
     sig = inspect.signature(fn)
     doc = inspect.getdoc(fn) or ""
     parsed_doc = docstring_parser.parse(doc)
