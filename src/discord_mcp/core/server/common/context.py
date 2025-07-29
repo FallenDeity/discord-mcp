@@ -7,7 +7,7 @@ import logging
 import typing as t
 
 import attrs
-from mcp.server.fastmcp import Context
+from mcp.server.fastmcp.server import Context
 from mcp.server.session import ServerSession
 
 if t.TYPE_CHECKING:
@@ -26,6 +26,9 @@ __all__: tuple[str, ...] = (
 logger = logging.getLogger(__name__)
 
 
+DiscordMCPContext: t.TypeAlias = Context[ServerSession, "DiscordMCPLifespanResult", t.Any]
+
+
 @attrs.define
 class DiscordMCPLifespanResult(collections.UserDict[str, t.Any]):
     bot: Bot
@@ -37,49 +40,15 @@ class DiscordMCPLifespanResult(collections.UserDict[str, t.Any]):
         return f"{self.__class__.__name__}(data={self.data})"
 
 
-class DiscordMCPContext(Context[ServerSession, DiscordMCPLifespanResult, t.Any]): ...
-
-
 @contextlib.asynccontextmanager
-async def starlette_lifespan(app: DiscordMCPStarletteApp) -> t.AsyncIterator[DiscordMCPLifespanResult]:
-    if not app.session_manager:
-        raise RuntimeError("Session manager is not initialized, cannot run lifespan context")
-
-    logger.info("Starting application with StreamableHTTP session manager...")
-
-    async with app.session_manager.run():
-        logger.info("Application started with StreamableHTTP session manager!")
-
-        await app.bot.login(str(app.bot.environment.DISCORD_TOKEN))
-        _bot_task = asyncio.create_task(app.bot.connect())
-        try:
-            await app.bot.wait_until_ready()
-            logger.info(f"Discord bot connected as {app.bot.user}")
-            yield DiscordMCPLifespanResult(bot=app.bot)
-        finally:
-            logger.info("Application shutting down...")
-
-            if _bot_task:
-                _bot_task.cancel()
-                try:
-                    await _bot_task
-                except asyncio.CancelledError:
-                    pass
-                except Exception as e:
-                    logger.error(f"Error during bot shutdown: {e}")
-            await app.bot.close()
-
-            logger.info("Application shutdown complete.")
-
-
-@contextlib.asynccontextmanager
-async def stdio_lifespan(app: STDIODiscordMCPServer) -> t.AsyncIterator[DiscordMCPLifespanResult]:
-    await app.bot.login(str(app.bot.environment.DISCORD_TOKEN))
-    _bot_task = asyncio.create_task(app.bot.connect())
+async def _manage_bot_lifecycle(bot: Bot) -> t.AsyncIterator[DiscordMCPLifespanResult]:
+    """Common bot lifecycle management for both server types."""
+    await bot.login(str(bot.environment.DISCORD_TOKEN))
+    _bot_task = asyncio.create_task(bot.connect())
     try:
-        await app.bot.wait_until_ready()
-        logger.info(f"Discord bot connected as {app.bot.user}")
-        yield DiscordMCPLifespanResult(bot=app.bot)
+        await bot.wait_until_ready()
+        logger.info(f"Discord bot connected as {bot.user}")
+        yield DiscordMCPLifespanResult(bot=bot)
     finally:
         logger.info("Application shutting down...")
 
@@ -91,6 +60,26 @@ async def stdio_lifespan(app: STDIODiscordMCPServer) -> t.AsyncIterator[DiscordM
                 pass
             except Exception as e:
                 logger.error(f"Error during bot shutdown: {e}")
-        await app.bot.close()
+        await bot.close()
 
         logger.info("Application shutdown complete.")
+
+
+@contextlib.asynccontextmanager
+async def starlette_lifespan(app: DiscordMCPStarletteApp) -> t.AsyncIterator[DiscordMCPLifespanResult]:
+    if not app.session_manager:
+        raise RuntimeError("Session manager is not initialized, cannot run lifespan context")
+
+    logger.info("Starting application with StreamableHTTP session manager...")
+
+    async with app.session_manager.run():
+        logger.info("Application started with StreamableHTTP session manager!")
+        async with _manage_bot_lifecycle(app.bot) as result:
+            yield result
+
+
+@contextlib.asynccontextmanager
+async def stdio_lifespan(app: STDIODiscordMCPServer) -> t.AsyncIterator[DiscordMCPLifespanResult]:
+    async with _manage_bot_lifecycle(app.bot) as result:
+        yield result
+        logger.info("Application shutting down...")
