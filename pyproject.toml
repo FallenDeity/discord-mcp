@@ -17,6 +17,7 @@ mcp = "^1.12.1"
 discord-py = "^2.5.2"
 python-dotenv = "^1.1.1"
 docstring-parser = "^0.17.0"
+aiosqlite = "^0.21.0"
 
 
 [tool.poetry.group.dev.dependencies]

@@ -73,7 +73,6 @@ async def starlette_lifespan(app: DiscordMCPStarletteApp) -> t.AsyncIterator[Dis
     logger.info("Starting application with StreamableHTTP session manager...")
 
     async with app.session_manager.run():
-        logger.info("Application started with StreamableHTTP session manager!")
         async with _manage_bot_lifecycle(app.bot) as result:
             yield result
 

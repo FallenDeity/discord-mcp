@@ -20,6 +20,8 @@ from discord_mcp.core.server.common.context import (
 )
 from discord_mcp.core.server.common.middleware import RequestLoggingMiddleware
 from discord_mcp.core.server.common.tools.manager import DiscordMCPToolManager
+from discord_mcp.persistence.adapters.sqlite_adapter import SQLiteAdapeter
+from discord_mcp.persistence.event_store import PersistentEventStore
 
 if t.TYPE_CHECKING:
     from discord_mcp.core.bot import Bot
@@ -196,10 +198,11 @@ class BaseDiscordMCPServer(Server[DiscordMCPLifespanResult, RequestT]):
 class HTTPDiscordMCPServer(BaseDiscordMCPServer[Request]):
     @property
     def streamable_http_app(self) -> Starlette:
-        # TODO: Add event store and other stuff here
-        session_manager = StreamableHTTPSessionManager(app=self)
+        # TODO: Make this configurable from cli
+        event_store = PersistentEventStore(adapter=SQLiteAdapeter())
+        session_manager = StreamableHTTPSessionManager(app=self, event_store=event_store)
 
-        # TODO: Add auth stuff here, and make mount path configurable
+        # TODO: Add auth stuff here, and make mount path configurable from cli
         starlette_app = DiscordMCPStarletteApp(
             bot=self.bot,
             session_manager=session_manager,
