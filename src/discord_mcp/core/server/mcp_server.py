@@ -94,10 +94,10 @@ class BaseDiscordMCPServer(Server[DiscordMCPLifespanResult, RequestT]):
         return Context(request_context=request_context, fastmcp=None)
 
     async def _call_tool(self, name: str, arguments: dict[str, t.Any]) -> t.Sequence[ContentBlock] | dict[str, t.Any]:
-        _, structured_content = await self._tool_manager.call_tool(
-            name, arguments, context=self.get_context(), convert_result=True
-        )
-        return structured_content
+        result = await self._tool_manager.call_tool(name, arguments, context=self.get_context(), convert_result=True)
+        if isinstance(result, tuple):
+            return t.cast(dict[str, t.Any], result[1])
+        return t.cast(t.Sequence[ContentBlock], result)
 
     # TODO: Offload these decorator functions into a central registry, and just load them here using a plugin system.
     def add_tool(

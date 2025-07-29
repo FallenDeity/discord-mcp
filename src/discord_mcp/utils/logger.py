@@ -97,7 +97,8 @@ class JSONFormatter(logging.Formatter):
         json_log: dict[str, t.Any] = {
             "asctime": self.formatTime(record, self.datefmt),
             "levelname": (
-                record.levelname if not self.use_colors
+                record.levelname
+                if not self.use_colors
                 else f"{LogLevelColors.from_level(record.levelname)}{record.levelname}{LogLevelColors.ENDC}"
             ),
             "name": f"{record.name}",
@@ -119,7 +120,7 @@ class JSONFormatter(logging.Formatter):
                 if attr == "color_message" and self.use_colors:
                     json_log[attr] = pass_args(record.args, getattr(record, attr))  # type: ignore
                 elif attr == "color_message" and not self.use_colors:
-                    pass # not add color_message if colors are disabled (reduces redundancy in logs)
+                    pass  # not add color_message if colors are disabled (reduces redundancy in logs)
                 else:
                     json_log[attr] = getattr(record, attr)
 

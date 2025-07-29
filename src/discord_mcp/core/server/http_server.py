@@ -22,6 +22,15 @@ def run_server(bot: "Bot") -> None:
         """Get the latency of the discord bot."""
         return f"Latency: {ctx.request_context.lifespan_context.bot.latency * 1000:.2f} ms"
 
+    @mcp.tool()
+    async def get_bot_info(ctx: DiscordMCPContext) -> dict[str, t.Any]:  # type: ignore
+        """Get information about the discord bot."""
+        bot = ctx.request_context.lifespan_context.bot
+        if not bot.user:
+            logger.warning("Bot user is not available.")
+            raise ValueError("Bot user is not available.")
+        return bot.user._to_minimal_user_json()
+
     uvicorn.run(
         mcp.streamable_http_app,
         host="127.0.0.1",
