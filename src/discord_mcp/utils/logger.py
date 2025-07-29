@@ -11,13 +11,11 @@ import traceback
 import typing as t
 from logging.handlers import RotatingFileHandler
 
-import pythonjsonlogger
-
 __all__: tuple[str, ...] = (
     "LogLevelColors",
     "RelativePathFilter",
     "DailyRotatingFileHandler",
-    "StructuredJsonFormatter",
+    "JSONFormatter",
     "setup_logging",
     "add_to_log_context",
 )
@@ -54,58 +52,79 @@ class ContextFilter(logging.Filter):
         return True
 
 
-class StructuredJsonFormatter(pythonjsonlogger.json.JsonFormatter):
-    """Custom formatter for log messages."""
+BASE_DICT_ATTRS: tuple[str, ...] = (
+    "name",
+    "msg",
+    "args",
+    "levelname",
+    "levelno",
+    "pathname",
+    "filename",
+    "module",
+    "exc_info",
+    "exc_text",
+    "stack_info",
+    "lineno",
+    "funcName",
+    "created",
+    "msecs",
+    "relativeCreated",
+    "thread",
+    "threadName",
+    "processName",
+    "process",
+)
 
+
+def pass_args(args: list[t.Any], msg: str) -> str:
+    msg = str(msg)
+    if args:
+        msg = msg % args
+    return msg
+
+
+class JSONFormatter(logging.Formatter):
     def __init__(
         self,
-        *args: t.Any,
-        fmt: str = "%(asctime)s %(name)s %(pathname)s %(funcName)s %(lineno)s %(levelname)s %(message)s",
+        *,
         datefmt: str = "%Y-%m-%d %H:%M:%S",
-        style: str = "%",
-        json_default: t.Callable[..., t.Any] | str | None = None,
-        json_encoder: t.Callable[..., t.Any] | str | None = None,
-        json_serializer: t.Callable[..., t.Any] | str = json.dumps,
-        json_indent: int | str | None = 2,
-        json_ensure_ascii: bool = True,
         use_colors: bool = True,
-        **kwargs: t.Any,
     ) -> None:
-        super().__init__(
-            *args,
-            **kwargs,
-            fmt=fmt,
-            datefmt=datefmt,
-            style=style,
-            json_default=json_default,
-            json_encoder=json_encoder,
-            json_serializer=json_serializer,
-            json_indent=json_indent,
-            json_ensure_ascii=json_ensure_ascii,
-        )
+        super().__init__("%(levelname)s %(name)s %(message)s", datefmt=datefmt)
         self.use_colors = use_colors
 
     def format(self, record: logging.LogRecord) -> str:
-        record.levelname = f"{LogLevelColors.from_level(record.levelname)}{record.levelname}{LogLevelColors.ENDC}"
-        formatted = super().format(record)
-        if self.use_colors:
-            return formatted.replace("\\u001b", "\033").replace("\u001b", "\033")
-        return formatted
-
-    def add_fields(
-        self, log_record: t.Dict[str, t.Any], record: logging.LogRecord, message_dict: t.Dict[str, t.Any]
-    ) -> None:
-        super().add_fields(log_record, record, message_dict)
-
+        json_log: dict[str, t.Any] = {
+            "asctime": self.formatTime(record, self.datefmt),
+            "levelname": (
+                record.levelname if not self.use_colors
+                else f"{LogLevelColors.from_level(record.levelname)}{record.levelname}{LogLevelColors.ENDC}"
+            ),
+            "name": f"{record.name}",
+            "logLocation": f"{record.name}.{record.funcName}:{record.lineno}",
+            "message": record.getMessage(),
+        }
         if record.exc_info:
             exc_type, exc_value, exc_traceback = record.exc_info
-            log_record["exception"] = {
+            json_log["exception"] = {
                 "exc_type": getattr(exc_type, "__name__", str(exc_type)),
                 "exc_value": str(exc_value),
                 "traceback": traceback.format_exception(exc_type, exc_value, exc_traceback),
             }
-            log_record.pop("exc_info", None)
-            log_record.pop("exc_text", None)
+
+        for attr in record.__dict__:
+            if attr not in BASE_DICT_ATTRS:
+                # this is needed because uvicorn passes some extra colored messages
+                # we can use this too ig
+                if attr == "color_message" and self.use_colors:
+                    json_log[attr] = pass_args(record.args, getattr(record, attr))  # type: ignore
+                elif attr == "color_message" and not self.use_colors:
+                    pass # not add color_message if colors are disabled (reduces redundancy in logs)
+                else:
+                    json_log[attr] = getattr(record, attr)
+
+        formatted = json.dumps(json_log, indent=4)
+        return formatted.replace("\\u001b", "\033").replace("\u001b", "\033")
 
 
 class DailyRotatingFileHandler(RotatingFileHandler):
@@ -136,7 +155,7 @@ class DailyRotatingFileHandler(RotatingFileHandler):
             delay=delay,
             errors=errors,
         )
-        self.setFormatter(StructuredJsonFormatter(use_colors=False))
+        self.setFormatter(JSONFormatter(use_colors=False))
         self.addFilter(RelativePathFilter())
         self.addFilter(ContextFilter())
 
@@ -193,11 +212,11 @@ def setup_logging(
         },
         "formatters": {
             "json_colored": {
-                "()": StructuredJsonFormatter,
+                "()": JSONFormatter,
                 "use_colors": True,
             },
             "json_plain": {
-                "()": StructuredJsonFormatter,
+                "()": JSONFormatter,
                 "use_colors": False,
             },
         },
