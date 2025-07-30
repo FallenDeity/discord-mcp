@@ -6,9 +6,8 @@ import re
 import typing as t
 
 from mcp.server.fastmcp.exceptions import ResourceError
-from mcp.server.fastmcp.resources import FunctionResource, Resource
-from mcp.server.fastmcp.resources.resource_manager import ResourceManager
-from mcp.server.fastmcp.server import Context, Settings, StreamableHTTPASGIApp
+from mcp.server.fastmcp.resources import Resource
+from mcp.server.fastmcp.server import Settings, StreamableHTTPASGIApp
 from mcp.server.lowlevel import Server
 from mcp.server.lowlevel.helper_types import ReadResourceContents
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
@@ -31,13 +30,16 @@ from discord_mcp.core.bot import Bot
 from discord_mcp.core.server.common.context import (
     DiscordMCPContext,
     DiscordMCPLifespanResult,
+    get_context,
     starlette_lifespan,
     stdio_lifespan,
 )
 from discord_mcp.core.server.common.middleware import RequestLoggingMiddleware
+from discord_mcp.core.server.common.resources.manager import DiscordMCPFunctionResource, DiscordMCPResourceManager
 from discord_mcp.core.server.common.tools.manager import DiscordMCPToolManager
 from discord_mcp.persistence.adapters.sqlite_adapter import SQLiteAdapeter
 from discord_mcp.persistence.event_store import PersistentEventStore
+from discord_mcp.utils.checks import find_kwarg_by_type
 from discord_mcp.utils.converters import convert_name_to_title, extract_mime_type_from_fn_return
 
 if t.TYPE_CHECKING:
@@ -75,7 +77,9 @@ class BaseDiscordMCPServer(Server[DiscordMCPLifespanResult, RequestT]):
         self.bot = bot
         self.settings = settings
         self._tool_manager = DiscordMCPToolManager(warn_on_duplicate_tools=self.settings.warn_on_duplicate_tools)
-        self._resource_manager = ResourceManager(warn_on_duplicate_resources=self.settings.warn_on_duplicate_resources)
+        self._resource_manager = DiscordMCPResourceManager(
+            warn_on_duplicate_resources=self.settings.warn_on_duplicate_resources
+        )
         super().__init__(*args, name=name, **kwargs)
         self._setup_handlers()
 
@@ -131,19 +135,8 @@ class BaseDiscordMCPServer(Server[DiscordMCPLifespanResult, RequestT]):
             for template in templates
         ]
 
-    def get_context(self) -> DiscordMCPContext:
-        """
-        Returns a Context object. Note that the context will only be valid
-        during a request; outside a request, most methods will error.
-        """
-        try:
-            request_context = self.request_context
-        except LookupError:
-            request_context = None
-        return Context(request_context=request_context, fastmcp=None)
-
     async def _call_tool(self, name: str, arguments: dict[str, t.Any]) -> t.Sequence[ContentBlock] | dict[str, t.Any]:
-        result = await self._tool_manager.call_tool(name, arguments, context=self.get_context(), convert_result=True)
+        result = await self._tool_manager.call_tool(name, arguments, context=get_context(), convert_result=True)
         if isinstance(result, tuple):
             return t.cast(dict[str, t.Any], result[1])
         return t.cast(t.Sequence[ContentBlock], result)
@@ -300,7 +293,11 @@ class BaseDiscordMCPServer(Server[DiscordMCPLifespanResult, RequestT]):
         def decorator(fn: AnyFunction) -> AnyFunction:
             # Check if this should be a template
             has_uri_params = "{" in uri and "}" in uri
-            has_func_params = bool(inspect.signature(fn).parameters)
+            has_func_params = any(
+                p
+                for p in inspect.signature(fn).parameters.values()
+                if p.name != find_kwarg_by_type(fn, DiscordMCPContext)
+            )
 
             # help typecheckers not cry about unbound variables
             nonlocal title, mime_type
@@ -311,6 +308,9 @@ class BaseDiscordMCPServer(Server[DiscordMCPLifespanResult, RequestT]):
                 # Validate that URI params match function params
                 uri_params = set(re.findall(r"{(\w+)}", uri))
                 func_params = set(inspect.signature(fn).parameters.keys())
+
+                if context_kwarg := find_kwarg_by_type(fn, DiscordMCPContext):
+                    func_params.discard(context_kwarg)
 
                 if uri_params != func_params:
                     raise ValueError(
@@ -328,7 +328,7 @@ class BaseDiscordMCPServer(Server[DiscordMCPLifespanResult, RequestT]):
                 )
             else:
                 # Register as regular resource
-                resource = FunctionResource.from_function(
+                resource = DiscordMCPFunctionResource.from_function(
                     fn=fn,
                     uri=uri,
                     name=name,
@@ -371,17 +371,6 @@ class HTTPDiscordMCPServer(BaseDiscordMCPServer[Request]):
             routes=[Mount("/mcp", app=StreamableHTTPASGIApp(session_manager))],
         )
         return starlette_app
-
-    def get_context(self) -> DiscordMCPContext:
-        """
-        Returns a Context object. Note that the context will only be valid
-        during a request; outside a request, most methods will error. For a Starlette app,
-        this will return a Context with the lifespan context set to the current request's state.
-        """
-        ctx = super().get_context()
-        if ctx.request_context and ctx.request_context.request:
-            ctx.request_context.lifespan_context = t.cast(DiscordMCPLifespanResult, ctx.request_context.request.state)
-        return ctx
 
 
 class STDIODiscordMCPServer(BaseDiscordMCPServer[Request]):

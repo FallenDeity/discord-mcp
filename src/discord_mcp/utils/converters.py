@@ -1,3 +1,4 @@
+import functools
 import inspect
 import typing as t
 
@@ -10,7 +11,14 @@ from discord_mcp.utils.enums import ResourceReturnType
 __all__: tuple[str, ...] = (
     "convert_name_to_title",
     "transform_function_signature",
+    "extract_mime_type_from_fn_return",
+    "add_description_to_annotation",
+    "prune_param",
+    "get_cached_typeadapter",
 )
+
+
+T = t.TypeVar("T")
 
 
 def convert_name_to_title(name: str) -> str:
@@ -84,11 +92,11 @@ def transform_function_signature(fn: t.Callable[..., t.Any]) -> t.Callable[..., 
 
 def extract_mime_type_from_fn_return(fn: t.Callable[..., t.Any]) -> str:
     sig = inspect.signature(fn)
+    return_annotation = t.get_type_hints(fn, include_extras=True).get("return", inspect._empty)
     r_type = (
-        sig.return_annotation
-        if not t.get_args(sig.return_annotation)
-        and sig.return_annotation in ResourceReturnType._value2member_map_.keys()
-        else (t.get_origin(sig.return_annotation) if t.get_args(sig.return_annotation) else sig.return_annotation)
+        return_annotation
+        if not t.get_args(return_annotation) and return_annotation in ResourceReturnType._value2member_map_.keys()
+        else (t.get_origin(return_annotation) if t.get_args(return_annotation) else return_annotation)
     )
 
     match r_type:
@@ -108,3 +116,96 @@ def extract_mime_type_from_fn_return(fn: t.Callable[..., t.Any]) -> str:
             raise RuntimeError(
                 f"Resources return type must be `str`, `bytes`, `list`, `dict`, `None` or a pydantic `BaseModel` subclasss, got {name!r}"
             )
+
+
+def prune_param(schema: dict[str, t.Any], param: str) -> dict[str, t.Any]:
+    """Return a new schema with *param* removed from `properties`, `required`,
+    and (if no longer referenced) `$defs`.
+    """
+
+    # Drop from properties/required
+    props = schema.get("properties", {})
+    removed = props.pop(param, None)
+    if removed is None:  # nothing to do
+        return schema
+
+    # Keep empty properties object rather than removing it entirely
+    schema["properties"] = props
+    if param in schema.get("required", []):
+        schema["required"].remove(param)
+        if not schema["required"]:
+            schema.pop("required")
+
+    return schema
+
+
+@functools.lru_cache(maxsize=5000)
+def get_cached_typeadapter(cls: T) -> pydantic.TypeAdapter[T]:
+    """
+    TypeAdapters are heavy objects, and in an application context we'd typically
+    create them once in a global scope and reuse them as often as possible.
+    However, this isn't feasible for user-generated functions. Instead, we use a
+    cache to minimize the cost of creating them as much as possible.
+    """
+    # For functions, process annotations to handle forward references and convert
+    # Annotated[Type, "string"] to Annotated[Type, Field(description="string")]
+
+    # print signature of the function
+    if inspect.isfunction(cls) or inspect.ismethod(cls):
+        if hasattr(cls, "__annotations__") and cls.__annotations__:
+            try:
+                # Resolve forward references first
+                resolved_hints = t.get_type_hints(cls, include_extras=True)
+            except Exception:
+                # If forward reference resolution fails, use original annotations
+                resolved_hints = cls.__annotations__
+
+            # Process annotations to convert string descriptions to Fields
+            processed_hints = {}
+
+            for name, annotation in resolved_hints.items():
+                # Check if this is Annotated[Type, "string"] and convert to Annotated[Type, Field(description="string")]
+                if (
+                    t.get_origin(annotation) is t.Annotated
+                    and len(t.get_args(annotation)) == 2
+                    and isinstance(t.get_args(annotation)[1], str)
+                ):
+                    base_type, description = t.get_args(annotation)
+                    processed_hints[name] = t.Annotated[base_type, pydantic.Field(description=description)]
+                else:
+                    processed_hints[name] = annotation
+
+            # Create new function if annotations changed
+            if processed_hints != cls.__annotations__:
+                import types
+
+                # Handle both functions and methods
+                if inspect.ismethod(cls):
+                    actual_func = cls.__func__
+                    code = actual_func.__code__
+                    globals_dict = actual_func.__globals__
+                    name = actual_func.__name__
+                    defaults = actual_func.__defaults__
+                    closure = actual_func.__closure__
+                else:
+                    code = cls.__code__
+                    globals_dict = cls.__globals__
+                    name = cls.__name__
+                    defaults = cls.__defaults__
+                    closure = cls.__closure__
+
+                new_func = types.FunctionType(
+                    code,
+                    globals_dict,
+                    name,
+                    defaults,
+                    closure,
+                )
+                new_func.__dict__.update(cls.__dict__)
+                new_func.__module__ = cls.__module__
+                new_func.__qualname__ = getattr(cls, "__qualname__", cls.__name__)
+                new_func.__annotations__ = processed_hints
+
+                return pydantic.TypeAdapter(new_func)
+
+    return pydantic.TypeAdapter(cls)
