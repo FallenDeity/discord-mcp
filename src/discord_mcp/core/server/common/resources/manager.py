@@ -8,12 +8,10 @@ import typing as t
 import pydantic_core
 from mcp.server.fastmcp.resources import FunctionResource, ResourceManager, ResourceTemplate
 from mcp.server.fastmcp.resources.base import Resource
-
-# TODO: Deal with validate call issues here
-from pydantic import AnyUrl  # , validate_call
+from pydantic import AnyUrl
 
 from discord_mcp.core.server.common.context import DiscordMCPContext, get_context
-from discord_mcp.utils.checks import find_kwarg_by_type
+from discord_mcp.utils.checks import context_safe_validate_call, find_kwarg_by_type
 from discord_mcp.utils.converters import get_cached_typeadapter, prune_param
 
 __all__: tuple[str, ...] = (
@@ -29,9 +27,13 @@ class DiscordMCPFunctionResource(FunctionResource):
     async def read(self) -> str | bytes:
         """Read the resource by calling the wrapped function."""
         try:
-            # Call the function first to see if it returns a coroutine
+            # First layer calls a dummy function to ensure, input validation is done,
+            # and then calls the actual function with the context if requirements meet
             context_kwarg = find_kwarg_by_type(self.fn, DiscordMCPContext)
             result = self.fn() if not context_kwarg else self.fn(**{context_kwarg: get_context()})
+            if callable(result):
+                result = result() if not context_kwarg else result(**{context_kwarg: get_context()})
+
             # If it's a coroutine, await it
             if inspect.iscoroutine(result):
                 result = await result
@@ -54,10 +56,23 @@ class DiscordMCPFunctionResource(FunctionResource):
         title: str | None = None,
         description: str | None = None,
         mime_type: str | None = None,
-    ) -> FunctionResource:
-        fn_res = super().from_function(fn, uri, name, title, description, mime_type)
-        fn_res.fn = fn
-        return fn_res
+    ) -> "FunctionResource":
+        """Create a FunctionResource from a function."""
+        func_name = name or fn.__name__
+        if func_name == "<lambda>":
+            raise ValueError("You must provide a name for lambda functions")
+
+        # Create a dummy sync function, from callback signature for input validation
+        validated_fn = context_safe_validate_call(fn)
+
+        return cls(
+            uri=AnyUrl(uri),
+            name=func_name,
+            title=title,
+            description=description or fn.__doc__ or "",
+            mime_type=mime_type or "text/plain",
+            fn=validated_fn,
+        )
 
 
 class DiscordMCPResourceTemplate(ResourceTemplate):
@@ -120,8 +135,8 @@ class DiscordMCPResourceTemplate(ResourceTemplate):
         parameters = get_cached_typeadapter(fn).json_schema()
         parameters = prune_param(parameters, param=context_kwarg) if context_kwarg else parameters
 
-        # ensure the arguments are properly cast
-        # fn = validate_call(fn) fails if not commented
+        # Create a dummy sync function, from callback signature for input validation
+        validated_fn = context_safe_validate_call(fn)
 
         return cls(
             uri_template=uri_template,
@@ -129,14 +144,17 @@ class DiscordMCPResourceTemplate(ResourceTemplate):
             title=title,
             description=description,
             mime_type=mime_type or "text/plain",
-            fn=fn,
+            fn=validated_fn,
             parameters=parameters,
         )
 
     async def create_resource(self, uri: str, params: dict[str, t.Any]) -> Resource:
         try:
-            # Call function and check if result is a coroutine
+            # First layer calls a dummy function to ensure, input validation is done,
+            # and then calls the actual function with the context if requirements meet
             result = self.fn(**params)
+            if callable(result):
+                result = result(**params)
             if inspect.iscoroutine(result):
                 result = await result
 
@@ -146,7 +164,7 @@ class DiscordMCPResourceTemplate(ResourceTemplate):
                 title=self.title,
                 description=self.description,
                 mime_type=self.mime_type,
-                fn=lambda: result,  # Capture result in closure
+                fn=lambda: result,
             )
         except Exception as e:
             raise ValueError(f"Error creating resource from template: {e}")

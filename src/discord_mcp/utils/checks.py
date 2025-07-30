@@ -2,10 +2,13 @@ import inspect
 import typing as t
 from types import UnionType
 
+from pydantic import validate_call
+
 __all__: tuple[str, ...] = (
     "issubclass_safe",
     "is_class_member_of_type",
     "find_kwarg_by_type",
+    "context_safe_validate_call",
 )
 
 
@@ -65,3 +68,29 @@ def find_kwarg_by_type(fn: t.Callable[..., t.Any], kwarg_type: t.Type[t.Any]) ->
         if is_class_member_of_type(annotation, kwarg_type):
             return name
     return None
+
+
+def context_safe_validate_call(fn: t.Callable[..., t.Any]) -> t.Callable[..., t.Any]:
+    """Creates a validator with the same signature that returns the original function."""
+
+    sig = inspect.signature(fn)
+    if annotations := getattr(fn, "__annotations__", {}):
+        try:
+            globalns = getattr(fn, "__globals__", {})
+            localns = getattr(fn, "__locals__", None)
+            annotations = t.get_type_hints(fn, globalns=globalns, localns=localns)
+        except (NameError, AttributeError):
+            # Fall back to original annotations if resolution fails
+            pass
+
+    def validator(*args: t.Any, **kwargs: t.Any) -> t.Callable[..., t.Any]:
+        # Bind to validate signature matching
+        bound = sig.bind(*args, **kwargs)
+        bound.apply_defaults()
+        return fn
+
+    # Copy the signature and annotations to the validator
+    validator.__signature__ = sig  # type: ignore
+    validator.__annotations__ = annotations
+
+    return validate_call(validator)
