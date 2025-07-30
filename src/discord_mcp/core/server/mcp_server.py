@@ -15,11 +15,10 @@ from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 from mcp.types import (
     AnyFunction,
     ContentBlock,
-)
-from mcp.types import Resource as MCPResource
-from mcp.types import (
     Tool,
     ToolAnnotations,
+    Resource as MCPResource,
+    ResourceTemplate as MCPResourceTemplate,
 )
 from pydantic.networks import AnyUrl
 from starlette.applications import Starlette
@@ -86,6 +85,7 @@ class BaseDiscordMCPServer(Server[DiscordMCPLifespanResult, RequestT]):
         # for now we preserve this for backwards compatibility.
         self.call_tool(validate_input=False)(self._call_tool)
         self.list_resources()(self._list_resources)
+        self.list_resource_templates()(self._list_resource_templates)
         self.read_resource()(self._read_resource)
 
     async def _list_tools(self) -> list[Tool]:
@@ -115,6 +115,18 @@ class BaseDiscordMCPServer(Server[DiscordMCPLifespanResult, RequestT]):
                 mimeType=resource.mime_type,
             )
             for resource in resources
+        ]
+
+    async def _list_resource_templates(self) -> list[MCPResourceTemplate]:
+        templates = self._resource_manager.list_templates()
+        return [
+            MCPResourceTemplate(
+                uriTemplate=template.uri_template,
+                name=template.name,
+                title=template.title,
+                description=template.description,
+            )
+            for template in templates
         ]
 
     def get_context(self) -> DiscordMCPContext:
