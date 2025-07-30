@@ -26,22 +26,22 @@ repos:
             name: isort
             pass_filenames: false
             entry: poetry run isort .
-            language: python
+            language: system
 
           - id: black
             name: black
             pass_filenames: false
             entry: poetry run black .
-            language: python
+            language: system
 
           - id: pyright
             name: pyright
             pass_filenames: false
             entry: poetry run pyright .
-            language: python
+            language: system
 
           - id: ruff
             name: ruff
             pass_filenames: false
             entry: poetry run ruff check .
-            language: python
+            language: system

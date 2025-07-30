@@ -1,12 +1,27 @@
 from __future__ import annotations
 
+import inspect
 import logging
+import re
 import typing as t
 
+from mcp.server.fastmcp.exceptions import ResourceError
+from mcp.server.fastmcp.resources import FunctionResource, Resource
+from mcp.server.fastmcp.resources.resource_manager import ResourceManager
 from mcp.server.fastmcp.server import Context, Settings, StreamableHTTPASGIApp
 from mcp.server.lowlevel import Server
+from mcp.server.lowlevel.helper_types import ReadResourceContents
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
-from mcp.types import AnyFunction, ContentBlock, Tool, ToolAnnotations
+from mcp.types import (
+    AnyFunction,
+    ContentBlock,
+)
+from mcp.types import Resource as MCPResource
+from mcp.types import (
+    Tool,
+    ToolAnnotations,
+)
+from pydantic.networks import AnyUrl
 from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.routing import Mount
@@ -22,6 +37,7 @@ from discord_mcp.core.server.common.middleware import RequestLoggingMiddleware
 from discord_mcp.core.server.common.tools.manager import DiscordMCPToolManager
 from discord_mcp.persistence.adapters.sqlite_adapter import SQLiteAdapeter
 from discord_mcp.persistence.event_store import PersistentEventStore
+from discord_mcp.utils.converters import convert_name_to_title, extract_mime_type_from_fn_return
 
 if t.TYPE_CHECKING:
     from discord_mcp.core.bot import Bot
@@ -58,6 +74,7 @@ class BaseDiscordMCPServer(Server[DiscordMCPLifespanResult, RequestT]):
         self.bot = bot
         self.settings = settings
         self._tool_manager = DiscordMCPToolManager(warn_on_duplicate_tools=self.settings.warn_on_duplicate_tools)
+        self._resource_manager = ResourceManager(warn_on_duplicate_resources=self.settings.warn_on_duplicate_resources)
         super().__init__(*args, name=name, **kwargs)
         self._setup_handlers()
 
@@ -68,6 +85,8 @@ class BaseDiscordMCPServer(Server[DiscordMCPLifespanResult, RequestT]):
         # FastMCP does ad hoc conversion of incoming data before validating -
         # for now we preserve this for backwards compatibility.
         self.call_tool(validate_input=False)(self._call_tool)
+        self.list_resources()(self._list_resources)
+        self.read_resource()(self._read_resource)
 
     async def _list_tools(self) -> list[Tool]:
         """List all available tools."""
@@ -82,6 +101,20 @@ class BaseDiscordMCPServer(Server[DiscordMCPLifespanResult, RequestT]):
                 annotations=info.annotations,
             )
             for info in tools
+        ]
+
+    async def _list_resources(self) -> list[MCPResource]:
+        """List all available resources."""
+        resources = self._resource_manager.list_resources()
+        return [
+            MCPResource(
+                uri=resource.uri,
+                name=resource.name or "",
+                title=resource.title,
+                description=resource.description,
+                mimeType=resource.mime_type,
+            )
+            for resource in resources
         ]
 
     def get_context(self) -> DiscordMCPContext:
@@ -193,6 +226,120 @@ class BaseDiscordMCPServer(Server[DiscordMCPLifespanResult, RequestT]):
             return fn
 
         return decorator
+
+    def add_resource(self, resource: Resource) -> None:
+        self._resource_manager.add_resource(resource)
+
+    def resource(
+        self,
+        uri: str,
+        *,
+        name: str | None = None,
+        title: str | None = None,
+        description: str | None = None,
+        mime_type: str | None = None,
+    ) -> t.Callable[[AnyFunction], AnyFunction]:
+        """Decorator to register a function as a resource.
+
+        The function will be called when the resource is read to generate its content.
+        The function can return:
+        - str for text content
+        - bytes for binary content
+        - other types will be converted to JSON
+
+        If the URI contains parameters (e.g. "resource://{param}") or the function
+        has parameters, it will be registered as a template resource.
+
+        Args:
+            uri: URI for the resource (e.g. "resource://my-resource" or "resource://{param}")
+            name: Optional name for the resource
+            title: Optional human-readable title for the resource
+            description: Optional description of the resource
+            mime_type: Optional MIME type for the resource
+
+        Example:
+            @server.resource("resource://my-resource")
+            def get_data() -> str:
+                return "Hello, world!"
+
+            @server.resource("resource://my-resource")
+            async get_data() -> str:
+                data = await fetch_data()
+                return f"Hello, world! {data}"
+
+            @server.resource("resource://{city}/weather")
+            def get_weather(city: str) -> str:
+                return f"Weather for {city}"
+
+            @server.resource("resource://{city}/weather")
+            async def get_weather(city: str) -> str:
+                data = await fetch_weather(city)
+                return f"Weather for {city}: {data}"
+        """
+        # Check if user passed function directly instead of calling decorator
+        if callable(uri):
+            raise TypeError(
+                "The @resource decorator was used incorrectly. "
+                "Did you forget to call it? Use @resource('uri') instead of @resource"
+            )
+
+        def decorator(fn: AnyFunction) -> AnyFunction:
+            # Check if this should be a template
+            has_uri_params = "{" in uri and "}" in uri
+            has_func_params = bool(inspect.signature(fn).parameters)
+
+            # help typecheckers not cry about unbound variables
+            nonlocal title, mime_type
+            title = title or convert_name_to_title(name or fn.__name__)
+            mime_type = mime_type or extract_mime_type_from_fn_return(fn)
+
+            if has_uri_params or has_func_params:
+                # Validate that URI params match function params
+                uri_params = set(re.findall(r"{(\w+)}", uri))
+                func_params = set(inspect.signature(fn).parameters.keys())
+
+                if uri_params != func_params:
+                    raise ValueError(
+                        f"Mismatch between URI parameters {uri_params} and function parameters {func_params}"
+                    )
+
+                # Register as template
+                self._resource_manager.add_template(
+                    fn=fn,
+                    uri_template=uri,
+                    name=name,
+                    title=title,
+                    description=description,
+                    mime_type=mime_type,
+                )
+            else:
+                # Register as regular resource
+                resource = FunctionResource.from_function(
+                    fn=fn,
+                    uri=uri,
+                    name=name,
+                    title=title,
+                    description=description,
+                    mime_type=mime_type,
+                )
+                self.add_resource(resource)
+            return fn
+
+        return decorator
+
+    async def _read_resource(self, uri: AnyUrl | str) -> t.Iterable[ReadResourceContents]:
+        """Read a resource by URI."""
+
+        resource = await self._resource_manager.get_resource(uri)
+        if not resource:
+            raise ResourceError(f"Unknown resource: {uri}")
+
+        try:
+            content = await resource.read()
+            return [ReadResourceContents(content=content, mime_type=resource.mime_type)]
+        except Exception as e:
+            logger.exception(f"Error reading resource {uri}")
+            raise ResourceError(str(e))
 
 
 class HTTPDiscordMCPServer(BaseDiscordMCPServer[Request]):

@@ -5,6 +5,8 @@ import docstring_parser
 import pydantic
 from mcp.server.fastmcp import Context
 
+from discord_mcp.utils.enums import ResourceReturnType
+
 __all__: tuple[str, ...] = (
     "convert_name_to_title",
     "transform_function_signature",
@@ -78,3 +80,26 @@ def transform_function_signature(fn: t.Callable[..., t.Any]) -> t.Callable[..., 
     fn.__doc__ = parsed_doc.short_description or ""
     fn.__name__ = fn.__name__
     return fn
+
+
+def extract_mime_type_from_fn_return(fn: t.Callable[..., t.Any]) -> str:
+    sig = inspect.signature(fn)
+    r_type = (
+        sig.return_annotation
+        if not t.get_args(sig.return_annotation)
+        and sig.return_annotation in ResourceReturnType._value2member_map_.keys()
+        else (t.get_origin(sig.return_annotation) if t.get_args(sig.return_annotation) else sig.return_annotation)
+    )
+
+    match r_type:
+        case ResourceReturnType.STR.value:
+            return "text/plain"
+        case ResourceReturnType.BYTES.value:
+            return "application/octet"
+        case ResourceReturnType.LIST.value | ResourceReturnType.DICT.value | ResourceReturnType.NONE.value:
+            return "application/json"
+        case ResourceReturnType.EMPTY.value:
+            raise TypeError("Resources must have a return type annotation!")
+        case _:
+            name = getattr(sig.return_annotation, "__name__", sig.return_annotation.__class__.__name__)
+            raise RuntimeError(f"Resources return type must be `str`, `bytes`, `list`, `dict` or `None`, got {name!r}")
