@@ -22,3 +22,9 @@ class ResourceReturnType(enum.Enum):
     DICT = dict
     NONE = None
     PYDANTIC_BASE_MODEL = BaseModel
+
+
+class DiscordMCPFunctionType(enum.IntEnum):
+    TOOL = enum.auto()
+    RESOURCE = enum.auto()
+    PROMPT = enum.auto()
