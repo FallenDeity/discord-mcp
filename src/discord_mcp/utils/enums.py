@@ -1,5 +1,7 @@
 import enum
 
+from pydantic import BaseModel
+
 
 class ServerType(enum.StrEnum):
     """Enum for server types."""
@@ -19,3 +21,4 @@ class ResourceReturnType(enum.Enum):
     LIST = list
     DICT = dict
     NONE = None
+    PYDANTIC_BASE_MODEL = BaseModel
