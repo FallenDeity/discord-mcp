@@ -15,10 +15,12 @@ from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 from mcp.types import (
     AnyFunction,
     ContentBlock,
+)
+from mcp.types import Resource as MCPResource
+from mcp.types import ResourceTemplate as MCPResourceTemplate
+from mcp.types import (
     Tool,
     ToolAnnotations,
-    Resource as MCPResource,
-    ResourceTemplate as MCPResourceTemplate,
 )
 from pydantic.networks import AnyUrl
 from starlette.applications import Starlette
