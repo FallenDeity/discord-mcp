@@ -98,7 +98,7 @@ def extract_mime_type_from_fn_return(fn: t.Callable[..., t.Any]) -> str:
             return "application/octet"
         case ResourceReturnType.LIST.value | ResourceReturnType.DICT.value | ResourceReturnType.NONE.value:
             return "application/json"
-        case ResourceReturnType.EMPTY.value:
+        case inspect._empty:
             raise TypeError("Resources must have a return type annotation!")
         case _:
             name = getattr(sig.return_annotation, "__name__", sig.return_annotation.__class__.__name__)

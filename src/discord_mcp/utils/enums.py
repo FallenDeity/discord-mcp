@@ -1,5 +1,4 @@
 import enum
-from inspect import _empty
 
 
 class ServerType(enum.StrEnum):
@@ -10,9 +9,13 @@ class ServerType(enum.StrEnum):
 
 
 class ResourceReturnType(enum.Enum):
+    """Enum to represent return types for resources.
+
+    Used to automatically infer the ``mime_type``.
+    """
+
     STR = str
     BYTES = bytes
     LIST = list
     DICT = dict
     NONE = None
-    EMPTY = _empty
