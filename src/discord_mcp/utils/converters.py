@@ -105,4 +105,6 @@ def extract_mime_type_from_fn_return(fn: t.Callable[..., t.Any]) -> str:
                 return "application/json"
 
             name = getattr(sig.return_annotation, "__name__", sig.return_annotation.__class__.__name__)
-            raise RuntimeError(f"Resources return type must be `str`, `bytes`, `list`, `dict`, `None` or a pydantic `BaseModel` subclasss, got {name!r}")
+            raise RuntimeError(
+                f"Resources return type must be `str`, `bytes`, `list`, `dict`, `None` or a pydantic `BaseModel` subclasss, got {name!r}"
+            )
