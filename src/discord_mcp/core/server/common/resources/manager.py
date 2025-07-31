@@ -93,7 +93,7 @@ class DiscordMCPResourceTemplate(ResourceTemplate):
             if param.kind == inspect.Parameter.VAR_POSITIONAL:
                 raise ValueError("Functions with *args are not supported as resource templates")
 
-        context_kwarg = find_kwarg_by_type(fn, kwarg_type=DiscordMCPContext)
+        context_kwarg = find_kwarg_by_type(fn, DiscordMCPContext)
 
         # Validate that URI params match function params
         uri_params = set(re.findall(r"{(\w+)(?:\*)?}", uri_template))

@@ -82,9 +82,6 @@ def context_safe_validate_call(fn: t.Callable[..., t.Any]) -> t.Callable[..., t.
             pass
 
     def validator(*args: t.Any, **kwargs: t.Any) -> t.Callable[..., t.Any]:
-        # Bind to validate signature matching
-        bound = sig.bind(*args, **kwargs)
-        bound.apply_defaults()
         return fn
 
     # Copy the signature and annotations to the validator
