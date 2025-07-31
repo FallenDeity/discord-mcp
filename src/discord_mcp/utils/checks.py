@@ -87,5 +87,7 @@ def context_safe_validate_call(fn: t.Callable[..., t.Any]) -> t.Callable[..., t.
     # Copy the signature and annotations to the validator
     validator.__signature__ = sig  # type: ignore
     validator.__annotations__ = annotations
+    validator.__doc__ = fn.__doc__
+    validator.__name__ = fn.__name__
 
     return validate_call(validator)
