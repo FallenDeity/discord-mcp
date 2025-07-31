@@ -114,7 +114,7 @@ def register_resource(
         name: Optional name for the resource
         title: Optional human-readable title for the resource
         description: Optional description of the resource
-        mime_type: Optional MIME type for the resource
+        mime_type: Optional MIME type for the resource. If not passed it's automatically inferred from the return type hint.
 
     Example:
         @register_resource("resource://my-resource")
