@@ -5,21 +5,24 @@ import logging
 import re
 import typing as t
 
+import pydantic_core
 from mcp.server.fastmcp.exceptions import ResourceError
-from mcp.server.fastmcp.resources import FunctionResource, Resource
-from mcp.server.fastmcp.resources.resource_manager import ResourceManager
-from mcp.server.fastmcp.server import Context, Settings, StreamableHTTPASGIApp
+from mcp.server.fastmcp.resources import Resource
+from mcp.server.fastmcp.server import Settings, StreamableHTTPASGIApp
 from mcp.server.lowlevel import Server
 from mcp.server.lowlevel.helper_types import ReadResourceContents
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 from mcp.types import (
     AnyFunction,
     ContentBlock,
+    GetPromptResult,
 )
+from mcp.types import Prompt as MCPPrompt
+from mcp.types import PromptArgument as MCPPromptArgument
 from mcp.types import Resource as MCPResource
 from mcp.types import ResourceTemplate as MCPResourceTemplate
+from mcp.types import Tool as MCPTool
 from mcp.types import (
-    Tool,
     ToolAnnotations,
 )
 from pydantic.networks import AnyUrl
@@ -31,13 +34,17 @@ from discord_mcp.core.bot import Bot
 from discord_mcp.core.server.common.context import (
     DiscordMCPContext,
     DiscordMCPLifespanResult,
+    get_context,
     starlette_lifespan,
     stdio_lifespan,
 )
 from discord_mcp.core.server.common.middleware import RequestLoggingMiddleware
+from discord_mcp.core.server.common.prompts.manager import DiscordMCPPrompt, DiscordMCPPromptManager
+from discord_mcp.core.server.common.resources.manager import DiscordMCPFunctionResource, DiscordMCPResourceManager
 from discord_mcp.core.server.common.tools.manager import DiscordMCPToolManager
 from discord_mcp.persistence.adapters.sqlite_adapter import SQLiteAdapeter
 from discord_mcp.persistence.event_store import PersistentEventStore
+from discord_mcp.utils.checks import find_kwarg_by_type
 from discord_mcp.utils.converters import convert_name_to_title, extract_mime_type_from_fn_return
 
 if t.TYPE_CHECKING:
@@ -75,7 +82,12 @@ class BaseDiscordMCPServer(Server[DiscordMCPLifespanResult, RequestT]):
         self.bot = bot
         self.settings = settings
         self._tool_manager = DiscordMCPToolManager(warn_on_duplicate_tools=self.settings.warn_on_duplicate_tools)
-        self._resource_manager = ResourceManager(warn_on_duplicate_resources=self.settings.warn_on_duplicate_resources)
+        self._resource_manager = DiscordMCPResourceManager(
+            warn_on_duplicate_resources=self.settings.warn_on_duplicate_resources
+        )
+        self._prompt_manager = DiscordMCPPromptManager(
+            warn_on_duplicate_prompts=self.settings.warn_on_duplicate_prompts
+        )
         super().__init__(*args, name=name, **kwargs)
         self._setup_handlers()
 
@@ -89,12 +101,14 @@ class BaseDiscordMCPServer(Server[DiscordMCPLifespanResult, RequestT]):
         self.list_resources()(self._list_resources)
         self.list_resource_templates()(self._list_resource_templates)
         self.read_resource()(self._read_resource)
+        self.list_prompts()(self._list_prompts)
+        self.get_prompt()(self._get_prompt)
 
-    async def _list_tools(self) -> list[Tool]:
+    async def _list_tools(self) -> list[MCPTool]:
         """List all available tools."""
         tools = self._tool_manager.list_tools()
         return [
-            Tool(
+            MCPTool(
                 name=info.name,
                 title=info.title,
                 description=info.description,
@@ -131,19 +145,8 @@ class BaseDiscordMCPServer(Server[DiscordMCPLifespanResult, RequestT]):
             for template in templates
         ]
 
-    def get_context(self) -> DiscordMCPContext:
-        """
-        Returns a Context object. Note that the context will only be valid
-        during a request; outside a request, most methods will error.
-        """
-        try:
-            request_context = self.request_context
-        except LookupError:
-            request_context = None
-        return Context(request_context=request_context, fastmcp=None)
-
     async def _call_tool(self, name: str, arguments: dict[str, t.Any]) -> t.Sequence[ContentBlock] | dict[str, t.Any]:
-        result = await self._tool_manager.call_tool(name, arguments, context=self.get_context(), convert_result=True)
+        result = await self._tool_manager.call_tool(name, arguments, context=get_context(), convert_result=True)
         if isinstance(result, tuple):
             return t.cast(dict[str, t.Any], result[1])
         return t.cast(t.Sequence[ContentBlock], result)
@@ -300,7 +303,11 @@ class BaseDiscordMCPServer(Server[DiscordMCPLifespanResult, RequestT]):
         def decorator(fn: AnyFunction) -> AnyFunction:
             # Check if this should be a template
             has_uri_params = "{" in uri and "}" in uri
-            has_func_params = bool(inspect.signature(fn).parameters)
+            has_func_params = any(
+                p
+                for p in inspect.signature(fn).parameters.values()
+                if p.name != find_kwarg_by_type(fn, DiscordMCPContext)
+            )
 
             # help typecheckers not cry about unbound variables
             nonlocal title, mime_type
@@ -311,6 +318,9 @@ class BaseDiscordMCPServer(Server[DiscordMCPLifespanResult, RequestT]):
                 # Validate that URI params match function params
                 uri_params = set(re.findall(r"{(\w+)}", uri))
                 func_params = set(inspect.signature(fn).parameters.keys())
+
+                if context_kwarg := find_kwarg_by_type(fn, DiscordMCPContext):
+                    func_params.discard(context_kwarg)
 
                 if uri_params != func_params:
                     raise ValueError(
@@ -328,7 +338,7 @@ class BaseDiscordMCPServer(Server[DiscordMCPLifespanResult, RequestT]):
                 )
             else:
                 # Register as regular resource
-                resource = FunctionResource.from_function(
+                resource = DiscordMCPFunctionResource.from_function(
                     fn=fn,
                     uri=uri,
                     name=name,
@@ -355,6 +365,102 @@ class BaseDiscordMCPServer(Server[DiscordMCPLifespanResult, RequestT]):
             logger.exception(f"Error reading resource {uri}")
             raise ResourceError(str(e))
 
+    def add_prompt(self, prompt: DiscordMCPPrompt) -> None:
+        """Add a prompt to the server.
+
+        Args:
+            prompt: A Prompt instance to add
+        """
+        self._prompt_manager.add_prompt(prompt)
+
+    def prompt(
+        self, name: str | None = None, title: str | None = None, description: str | None = None
+    ) -> t.Callable[[AnyFunction], AnyFunction]:
+        """Decorator to register a prompt.
+
+        Args:
+            name: Optional name for the prompt (defaults to function name)
+            title: Optional human-readable title for the prompt
+            description: Optional description of what the prompt does
+
+        Example:
+            @server.prompt()
+            def analyze_table(table_name: str) -> list[Message]:
+                schema = read_table_schema(table_name)
+                return [
+                    {
+                        "role": "user",
+                        "content": f"Analyze this schema:\n{schema}"
+                    }
+                ]
+
+            @server.prompt()
+            async def analyze_file(path: str) -> list[Message]:
+                content = await read_file(path)
+                return [
+                    {
+                        "role": "user",
+                        "content": {
+                            "type": "resource",
+                            "resource": {
+                                "uri": f"file://{path}",
+                                "text": content
+                            }
+                        }
+                    }
+                ]
+        """
+        # Check if user passed function directly instead of calling decorator
+        if callable(name):
+            raise TypeError(
+                "The @prompt decorator was used incorrectly. "
+                "Did you forget to call it? Use @prompt() instead of @prompt"
+            )
+
+        def decorator(func: AnyFunction) -> AnyFunction:
+            prompt = DiscordMCPPrompt.from_function(func, name=name, title=title, description=description)
+            self.add_prompt(prompt)
+            return func
+
+        return decorator
+
+    async def _list_prompts(self) -> list[MCPPrompt]:
+        """List all available prompts."""
+        prompts = self._prompt_manager.list_prompts()
+        return [
+            MCPPrompt(
+                name=prompt.name,
+                title=prompt.title,
+                description=prompt.description,
+                arguments=[
+                    MCPPromptArgument(
+                        name=arg.name,
+                        description=arg.description,
+                        required=arg.required,
+                    )
+                    for arg in (prompt.arguments or [])
+                ],
+            )
+            for prompt in prompts
+        ]
+
+    async def _get_prompt(self, name: str, arguments: dict[str, t.Any] | None = None) -> GetPromptResult:
+        """Get a prompt by name with arguments."""
+        try:
+            prompt = self._prompt_manager.get_prompt(name)
+            if not prompt:
+                raise ValueError(f"Unknown prompt: {name}")
+
+            messages = await prompt.render(arguments)
+
+            return GetPromptResult(
+                description=prompt.description,
+                messages=pydantic_core.to_jsonable_python(messages),
+            )
+        except Exception as e:
+            logger.exception(f"Error getting prompt {name}")
+            raise ValueError(str(e))
+
 
 class HTTPDiscordMCPServer(BaseDiscordMCPServer[Request]):
     @property
@@ -371,17 +477,6 @@ class HTTPDiscordMCPServer(BaseDiscordMCPServer[Request]):
             routes=[Mount("/mcp", app=StreamableHTTPASGIApp(session_manager))],
         )
         return starlette_app
-
-    def get_context(self) -> DiscordMCPContext:
-        """
-        Returns a Context object. Note that the context will only be valid
-        during a request; outside a request, most methods will error. For a Starlette app,
-        this will return a Context with the lifespan context set to the current request's state.
-        """
-        ctx = super().get_context()
-        if ctx.request_context and ctx.request_context.request:
-            ctx.request_context.lifespan_context = t.cast(DiscordMCPLifespanResult, ctx.request_context.request.state)
-        return ctx
 
 
 class STDIODiscordMCPServer(BaseDiscordMCPServer[Request]):

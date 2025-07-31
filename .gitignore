@@ -297,3 +297,4 @@ cython_debug/
 poetry.lock
 ruff_cache/
 logs/
+*.db

@@ -6,6 +6,8 @@ import typing as t
 from mcp.server.fastmcp.tools import Tool, ToolManager
 from mcp.types import ToolAnnotations
 
+from discord_mcp.core.server.common.context import DiscordMCPContext
+from discord_mcp.utils.checks import find_kwarg_by_type
 from discord_mcp.utils.converters import convert_name_to_title, transform_function_signature
 
 __all__: tuple[str, ...] = (
@@ -27,7 +29,7 @@ class DiscordMCPTool(Tool):
     ) -> DiscordMCPTool:
         # Allow reading typehints and param doc strings from the function docstring.
         fn = transform_function_signature(fn)
-        tool = super().from_function(*args, fn=fn, **kwargs)
+        tool = super().from_function(*args, fn=fn, context_kwarg=find_kwarg_by_type(fn, DiscordMCPContext), **kwargs)
         tool.title = tool.title or convert_name_to_title(tool.name)
         return t.cast(DiscordMCPTool, tool)
 

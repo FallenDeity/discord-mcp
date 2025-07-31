@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import collections
 import logging
 import typing as t
@@ -19,7 +21,7 @@ class InMemoryAdapter(EventStoreAdapter):
         self._streams: t.Dict[StreamId, collections.deque[EventRecord]] = collections.defaultdict(collections.deque)
         self._events: t.Dict[EventId, EventRecord] = {}
 
-    async def __aenter__(self) -> "InMemoryAdapter":
+    async def __aenter__(self) -> InMemoryAdapter:
         logger.info("InMemoryAdapter initialized.")
         return self
 

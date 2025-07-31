@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import logging
 import typing as t
 from types import TracebackType
@@ -21,7 +23,7 @@ class SQLiteAdapeter(EventStoreAdapter):
     def __init__(self, db: str = "event_store.db") -> None:
         self._db_path = db
 
-    async def __aenter__(self) -> "SQLiteAdapeter":
+    async def __aenter__(self) -> SQLiteAdapeter:
         self._db = await aiosqlite.connect(self._db_path)
         logger.info(f"Connected to SQLite database at {self._db_path}")
         await self.init_schema()

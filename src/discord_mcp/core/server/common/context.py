@@ -8,7 +8,9 @@ import typing as t
 
 import attrs
 from mcp.server.fastmcp.server import Context
+from mcp.server.lowlevel.server import request_ctx
 from mcp.server.session import ServerSession
+from starlette.requests import Request
 
 if t.TYPE_CHECKING:
     from discord_mcp.core.bot import Bot
@@ -20,6 +22,7 @@ __all__: tuple[str, ...] = (
     "DiscordMCPContext",
     "starlette_lifespan",
     "stdio_lifespan",
+    "get_context",
 )
 
 
@@ -82,3 +85,14 @@ async def stdio_lifespan(app: STDIODiscordMCPServer) -> t.AsyncIterator[DiscordM
     async with _manage_bot_lifecycle(app.bot) as result:
         yield result
         logger.info("Application shutting down...")
+
+
+def get_context() -> DiscordMCPContext:
+    try:
+        request_context = request_ctx.get()
+    except LookupError:
+        request_context = None
+    ctx = Context(request_context=request_context, fastmcp=None)
+    if ctx.request_context and ctx.request_context.request and isinstance(ctx.request_context.request, Request):
+        ctx.request_context.lifespan_context = t.cast(DiscordMCPLifespanResult, ctx.request_context.request.state)
+    return ctx
