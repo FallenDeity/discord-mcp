@@ -76,9 +76,7 @@ def context_safe_validate_call(fn: t.Callable[..., t.Any]) -> t.Callable[..., t.
     sig = inspect.signature(fn)
     if annotations := getattr(fn, "__annotations__", {}):
         try:
-            globalns = getattr(fn, "__globals__", {})
-            localns = getattr(fn, "__locals__", None)
-            annotations = t.get_type_hints(fn, globalns=globalns, localns=localns)
+            annotations = t.get_type_hints(fn, globalns=getattr(fn, "__globals__", {}))
         except (NameError, AttributeError):
             # Fall back to original annotations if resolution fails
             pass

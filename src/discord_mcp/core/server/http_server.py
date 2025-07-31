@@ -6,7 +6,7 @@ import typing as t
 import pydantic
 import uvicorn
 
-from discord_mcp.core.server.common.context import DiscordMCPContext, get_context
+from discord_mcp.core.server.common.context import DiscordMCPContext
 from discord_mcp.core.server.mcp_server import HTTPDiscordMCPServer
 
 if t.TYPE_CHECKING:
@@ -59,8 +59,6 @@ def run_server(bot: Bot) -> None:
     @mcp.resource("resource://system-status")
     async def get_system_status(ctx: DiscordMCPContext) -> dict[str, t.Any]:  # type: ignore
         """Provides system status information."""
-        context = get_context()
-        print(f"Context: {context.request_context}, lifespan: {context.request_context.lifespan_context}")
         return {
             "status": "operational",
             "request_id": ctx.request_id,

@@ -12,7 +12,7 @@ from pydantic import AnyUrl
 
 from discord_mcp.core.server.common.context import DiscordMCPContext, get_context
 from discord_mcp.utils.checks import context_safe_validate_call, find_kwarg_by_type
-from discord_mcp.utils.converters import get_cached_typeadapter, prune_param
+from discord_mcp.utils.converters import _process_callable_result, get_cached_typeadapter, prune_param
 
 __all__: tuple[str, ...] = (
     "DiscordMCPResourceManager",
@@ -30,13 +30,9 @@ class DiscordMCPFunctionResource(FunctionResource):
             # First layer calls a dummy function to ensure, input validation is done,
             # and then calls the actual function with the context if requirements meet
             context_kwarg = find_kwarg_by_type(self.fn, DiscordMCPContext)
-            result = self.fn() if not context_kwarg else self.fn(**{context_kwarg: get_context()})
-            if callable(result):
-                result = result() if not context_kwarg else result(**{context_kwarg: get_context()})
+            params = {} if not context_kwarg else {context_kwarg: get_context()}
 
-            # If it's a coroutine, await it
-            if inspect.iscoroutine(result):
-                result = await result
+            result = await _process_callable_result(self.fn, params)
 
             if isinstance(result, Resource):
                 return await result.read()
@@ -152,11 +148,7 @@ class DiscordMCPResourceTemplate(ResourceTemplate):
         try:
             # First layer calls a dummy function to ensure, input validation is done,
             # and then calls the actual function with the context if requirements meet
-            result = self.fn(**params)
-            if callable(result):
-                result = result(**params)
-            if inspect.iscoroutine(result):
-                result = await result
+            result = await _process_callable_result(self.fn, params)
 
             return DiscordMCPFunctionResource(
                 uri=uri,  # type: ignore

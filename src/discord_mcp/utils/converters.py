@@ -1,5 +1,6 @@
 import functools
 import inspect
+import types
 import typing as t
 
 import docstring_parser
@@ -15,6 +16,7 @@ __all__: tuple[str, ...] = (
     "add_description_to_annotation",
     "prune_param",
     "get_cached_typeadapter",
+    "_process_callable_result",
 )
 
 
@@ -85,6 +87,13 @@ def transform_function_signature(fn: t.Callable[..., t.Any]) -> t.Callable[..., 
     updated_sig = sig.replace(parameters=updated_params) if updated_params else sig
 
     fn.__signature__ = updated_sig  # type: ignore
+    fn.__annotations__ = {
+        name: param.annotation
+        for name, param in updated_sig.parameters.items()
+        if param.annotation is not inspect._empty
+    }
+    if updated_sig.return_annotation is not inspect._empty:
+        fn.__annotations__["return"] = updated_sig.return_annotation
     fn.__doc__ = parsed_doc.short_description or ""
     fn.__name__ = fn.__name__
     return fn
@@ -140,7 +149,7 @@ def prune_param(schema: dict[str, t.Any], param: str) -> dict[str, t.Any]:
 
 
 @functools.lru_cache(maxsize=5000)
-def get_cached_typeadapter(cls: T) -> pydantic.TypeAdapter[T]:
+def get_cached_typeadapter(obj: T) -> pydantic.TypeAdapter[T]:
     """
     TypeAdapters are heavy objects, and in an application context we'd typically
     create them once in a global scope and reuse them as often as possible.
@@ -149,16 +158,14 @@ def get_cached_typeadapter(cls: T) -> pydantic.TypeAdapter[T]:
     """
     # For functions, process annotations to handle forward references and convert
     # Annotated[Type, "string"] to Annotated[Type, Field(description="string")]
-
-    # print signature of the function
-    if inspect.isfunction(cls) or inspect.ismethod(cls):
-        if hasattr(cls, "__annotations__") and cls.__annotations__:
+    if inspect.isfunction(obj) or inspect.ismethod(obj):
+        if hasattr(obj, "__annotations__") and obj.__annotations__:
             try:
                 # Resolve forward references first
-                resolved_hints = t.get_type_hints(cls, include_extras=True)
+                resolved_hints = t.get_type_hints(obj, include_extras=True)
             except Exception:
                 # If forward reference resolution fails, use original annotations
-                resolved_hints = cls.__annotations__
+                resolved_hints = obj.__annotations__
 
             # Process annotations to convert string descriptions to Fields
             processed_hints = {}
@@ -176,23 +183,22 @@ def get_cached_typeadapter(cls: T) -> pydantic.TypeAdapter[T]:
                     processed_hints[name] = annotation
 
             # Create new function if annotations changed
-            if processed_hints != cls.__annotations__:
-                import types
+            if processed_hints != obj.__annotations__:
 
                 # Handle both functions and methods
-                if inspect.ismethod(cls):
-                    actual_func = cls.__func__
+                if inspect.ismethod(obj):
+                    actual_func = obj.__func__
                     code = actual_func.__code__
                     globals_dict = actual_func.__globals__
                     name = actual_func.__name__
                     defaults = actual_func.__defaults__
                     closure = actual_func.__closure__
                 else:
-                    code = cls.__code__
-                    globals_dict = cls.__globals__
-                    name = cls.__name__
-                    defaults = cls.__defaults__
-                    closure = cls.__closure__
+                    code = obj.__code__
+                    globals_dict = obj.__globals__
+                    name = obj.__name__
+                    defaults = obj.__defaults__
+                    closure = obj.__closure__
 
                 new_func = types.FunctionType(
                     code,
@@ -201,11 +207,21 @@ def get_cached_typeadapter(cls: T) -> pydantic.TypeAdapter[T]:
                     defaults,
                     closure,
                 )
-                new_func.__dict__.update(cls.__dict__)
-                new_func.__module__ = cls.__module__
-                new_func.__qualname__ = getattr(cls, "__qualname__", cls.__name__)
+                new_func.__dict__.update(obj.__dict__)
+                new_func.__module__ = obj.__module__
+                new_func.__qualname__ = getattr(obj, "__qualname__", obj.__name__)
                 new_func.__annotations__ = processed_hints
 
                 return pydantic.TypeAdapter(new_func)
 
-    return pydantic.TypeAdapter(cls)
+    return pydantic.TypeAdapter(obj)
+
+
+async def _process_callable_result(fn: t.Callable[..., t.Any], params: dict[str, t.Any]) -> t.Any:
+    result = fn(**params)
+    if callable(result):
+        result = result(**params)
+    # If it's a coroutine, await it
+    if inspect.iscoroutine(result):
+        result = await result
+    return result
