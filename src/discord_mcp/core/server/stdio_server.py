@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import logging
 import typing as t
 
@@ -13,7 +15,7 @@ if t.TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-async def run_server(bot: "Bot") -> None:
+async def run_server(bot: Bot) -> None:
     """Run the Discord MCP server."""
     mcp = STDIODiscordMCPServer(name="stdio-server", bot=bot)
 

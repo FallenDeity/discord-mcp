@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import abc
 import typing as t
 from types import TracebackType
@@ -11,7 +13,7 @@ __all__: tuple[str, ...] = ("EventStoreAdapter",)
 
 class EventStoreAdapter(abc.ABC):
     @abc.abstractmethod
-    async def __aenter__(self) -> "EventStoreAdapter":
+    async def __aenter__(self) -> EventStoreAdapter:
         """Initialize the adapter."""
         pass
 
