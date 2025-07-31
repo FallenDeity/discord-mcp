@@ -76,6 +76,63 @@ def run_server(bot: Bot) -> None:
             id=user.id, username=user.name, discriminator=user.discriminator, avatar_url=user.display_avatar.url
         )
 
+    @mcp.prompt()
+    def ask_about_topic(topic: str) -> str:  # type: ignore
+        """Generates a user message asking for an explanation of a topic."""
+        return f"Can you please explain the concept of '{topic}'?"
+
+    @mcp.prompt()
+    def analyze_data(numbers: list[int], metadata: dict[str, str], threshold: float) -> str:  # type: ignore
+        """Analyze numerical data."""
+        avg = sum(numbers) / len(numbers)
+        return f"Average: {avg}, above threshold: {avg > threshold}"
+
+    @mcp.prompt()
+    def data_analysis_prompt(  # type: ignore
+        data_uri: str,  # Required - no default value
+        analysis_type: str = "summary",  # Optional - has default value
+        include_charts: bool = False,  # Optional - has default value
+    ) -> str:
+        """Creates a request to analyze data with specific parameters."""
+        prompt = f"Please perform a '{analysis_type}' analysis on the data found at {data_uri}."
+        if include_charts:
+            prompt += " Include relevant charts and visualizations."
+        return prompt
+
+    @mcp.prompt()
+    async def generate_report_request(user_id: int, ctx: DiscordMCPContext) -> str:  # type: ignore
+        """
+        Generate a request for creating a user report.
+
+        This MCP prompt function retrieves user information from Discord and formats
+        it into a report generation request. It fetches user details including ID,
+        username, discriminator, and avatar URL, then returns a formatted request
+        string containing the user information in JSON format.
+
+        Args:
+            user_id (int): The Discord user ID to generate a report for.
+            ctx (DiscordMCPContext): The MCP context containing bot instance and request metadata.
+
+        Returns:
+            str: A formatted request string containing user information in JSON format
+                and the associated request ID.
+
+        Raises:
+            ValueError: If the user with the specified ID cannot be found.
+
+        Example:
+            The returned string will be in the format:
+            "Please create a user {user_json} report. Request ID: {request_id}"
+        """
+        bot = ctx.request_context.lifespan_context.bot
+        user = bot.get_user(user_id) or await bot.fetch_user(user_id)
+        if not user:
+            raise ValueError(f"User with ID {user_id} not found.")
+        user_info = UserInfo(
+            id=user.id, username=user.name, discriminator=user.discriminator, avatar_url=user.display_avatar.url
+        )
+        return f"Please create a user {user_info.model_dump_json()} report. Request ID: {ctx.request_id}"
+
     uvicorn.run(
         mcp.streamable_http_app,
         host="127.0.0.1",
