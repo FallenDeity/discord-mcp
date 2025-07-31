@@ -16,8 +16,10 @@ __all__: tuple[str, ...] = (
     "add_description_to_annotation",
     "prune_param",
     "get_cached_typeadapter",
-    "_process_callable_result",
+    "process_callable_result",
 )
+
+DEFAULT_TYPEADAPTER_CACHE_SIZE = 5000
 
 
 T = t.TypeVar("T")
@@ -148,7 +150,7 @@ def prune_param(schema: dict[str, t.Any], param: str) -> dict[str, t.Any]:
     return schema
 
 
-@functools.lru_cache(maxsize=5000)
+@functools.lru_cache(maxsize=DEFAULT_TYPEADAPTER_CACHE_SIZE)
 def get_cached_typeadapter(obj: T) -> pydantic.TypeAdapter[T]:
     """
     TypeAdapters are heavy objects, and in an application context we'd typically
@@ -217,11 +219,19 @@ def get_cached_typeadapter(obj: T) -> pydantic.TypeAdapter[T]:
     return pydantic.TypeAdapter(obj)
 
 
-async def _process_callable_result(fn: t.Callable[..., t.Any], params: dict[str, t.Any]) -> t.Any:
+async def process_callable_result(fn: t.Callable[..., t.Any], params: dict[str, t.Any]) -> t.Any:
+    """
+    Process the result of a callable function. If the result is itself callable,
+    it will be invoked with the same parameters. If the result is a coroutine,
+    it will be awaited. This is done when `validate_call` is being used a dummy wrapper function is created
+    with same signature as the original function and returns the original function after validating the parameters.
+    """
+    # Maybe the parameter validation wrapper
     result = fn(**params)
+    # If the result is callable, call it with the same parameters
     if callable(result):
         result = result(**params)
-    # If it's a coroutine, await it
+    # Original function can be a sync or async function, if it's a coroutine, await it
     if inspect.iscoroutine(result):
         result = await result
     return result

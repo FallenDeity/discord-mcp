@@ -12,7 +12,7 @@ from pydantic import AnyUrl
 
 from discord_mcp.core.server.common.context import DiscordMCPContext, get_context
 from discord_mcp.utils.checks import context_safe_validate_call, find_kwarg_by_type
-from discord_mcp.utils.converters import _process_callable_result, get_cached_typeadapter, prune_param
+from discord_mcp.utils.converters import get_cached_typeadapter, process_callable_result, prune_param
 
 __all__: tuple[str, ...] = (
     "DiscordMCPResourceManager",
@@ -32,7 +32,7 @@ class DiscordMCPFunctionResource(FunctionResource):
             context_kwarg = find_kwarg_by_type(self.fn, DiscordMCPContext)
             params = {} if not context_kwarg else {context_kwarg: get_context()}
 
-            result = await _process_callable_result(self.fn, params)
+            result = await process_callable_result(self.fn, params)
 
             if isinstance(result, Resource):
                 return await result.read()
@@ -148,7 +148,7 @@ class DiscordMCPResourceTemplate(ResourceTemplate):
         try:
             # First layer calls a dummy function to ensure, input validation is done,
             # and then calls the actual function with the context if requirements meet
-            result = await _process_callable_result(self.fn, params)
+            result = await process_callable_result(self.fn, params)
 
             return DiscordMCPFunctionResource(
                 uri=uri,  # type: ignore
