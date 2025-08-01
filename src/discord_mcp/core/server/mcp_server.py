@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import functools
 import inspect
 import logging
 import re
@@ -38,10 +39,15 @@ from discord_mcp.core.server.common.context import (
     starlette_lifespan,
     stdio_lifespan,
 )
-from discord_mcp.core.server.common.middleware import RequestLoggingMiddleware
 from discord_mcp.core.server.common.prompts.manager import DiscordMCPPrompt, DiscordMCPPromptManager
 from discord_mcp.core.server.common.resources.manager import DiscordMCPFunctionResource, DiscordMCPResourceManager
 from discord_mcp.core.server.common.tools.manager import DiscordMCPToolManager
+from discord_mcp.core.server.middleware import (
+    CallNext,
+    Middleware,
+    MiddlewareContext,
+    RequestLoggingMiddleware,
+)
 from discord_mcp.persistence.adapters.sqlite_adapter import SQLiteAdapeter
 from discord_mcp.persistence.event_store import PersistentEventStore
 from discord_mcp.utils.checks import find_kwarg_by_type
@@ -62,12 +68,17 @@ logger = logging.getLogger(__name__)
 
 class DiscordMCPStarletteApp(Starlette):
     def __init__(
-        self, *args: t.Any, bot: Bot, session_manager: StreamableHTTPSessionManager | None = None, **kwargs: t.Any
+        self,
+        *args: t.Any,
+        bot: Bot,
+        mcp_server: HTTPDiscordMCPServer,
+        session_manager: StreamableHTTPSessionManager | None = None,
+        **kwargs: t.Any,
     ) -> None:
         self.bot = bot
+        self.mcp_server = mcp_server
         self.session_manager = session_manager
         super().__init__(*args, **kwargs, lifespan=starlette_lifespan)
-        self.add_middleware(RequestLoggingMiddleware)
 
 
 class BaseDiscordMCPServer(Server[DiscordMCPLifespanResult, RequestT]):
@@ -81,6 +92,7 @@ class BaseDiscordMCPServer(Server[DiscordMCPLifespanResult, RequestT]):
     ) -> None:
         self.bot = bot
         self.settings = settings
+        self.middlewares: list[Middleware] = [RequestLoggingMiddleware()]
         self._tool_manager = DiscordMCPToolManager(warn_on_duplicate_tools=self.settings.warn_on_duplicate_tools)
         self._resource_manager = DiscordMCPResourceManager(
             warn_on_duplicate_resources=self.settings.warn_on_duplicate_resources
@@ -103,6 +115,22 @@ class BaseDiscordMCPServer(Server[DiscordMCPLifespanResult, RequestT]):
         self.read_resource()(self._read_resource)
         self.list_prompts()(self._list_prompts)
         self.get_prompt()(self._get_prompt)
+
+    def add_middleware(self, middleware: Middleware) -> None:
+        self.middlewares.append(middleware)
+
+    def _apply_middlewares(self) -> None:
+        def make_wrapper(handler: CallNext[t.Any, t.Any]) -> t.Callable[[MiddlewareContext[t.Any]], t.Awaitable[t.Any]]:
+            async def wrapper(ctx: MiddlewareContext[t.Any]) -> t.Any:
+                return await handler(ctx.message)
+
+            return wrapper
+
+        for request_type, handler in self.request_handlers.items():
+            chain = make_wrapper(handler)
+            for mw in reversed(self.middlewares):
+                chain = functools.partial(mw, call_next=chain)
+            self.request_handlers[request_type] = chain
 
     async def _list_tools(self) -> list[MCPTool]:
         """List all available tools."""
@@ -473,6 +501,7 @@ class HTTPDiscordMCPServer(BaseDiscordMCPServer[Request]):
         starlette_app = DiscordMCPStarletteApp(
             bot=self.bot,
             session_manager=session_manager,
+            mcp_server=self,
             debug=True,
             routes=[Mount("/mcp", app=StreamableHTTPASGIApp(session_manager))],
         )

@@ -75,6 +75,8 @@ async def starlette_lifespan(app: DiscordMCPStarletteApp) -> t.AsyncIterator[Dis
 
     logger.info("Starting application with StreamableHTTP session manager...")
 
+    app.mcp_server._apply_middlewares()
+
     async with app.session_manager.run():
         async with _manage_bot_lifecycle(app.bot) as result:
             yield result
@@ -82,6 +84,7 @@ async def starlette_lifespan(app: DiscordMCPStarletteApp) -> t.AsyncIterator[Dis
 
 @contextlib.asynccontextmanager
 async def stdio_lifespan(app: STDIODiscordMCPServer) -> t.AsyncIterator[DiscordMCPLifespanResult]:
+    app._apply_middlewares()
     async with _manage_bot_lifecycle(app.bot) as result:
         yield result
         logger.info("Application shutting down...")
