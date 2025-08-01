@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import functools
 import inspect
 import logging
 import re
@@ -21,6 +22,9 @@ from mcp.types import Prompt as MCPPrompt
 from mcp.types import PromptArgument as MCPPromptArgument
 from mcp.types import Resource as MCPResource
 from mcp.types import ResourceTemplate as MCPResourceTemplate
+from mcp.types import (
+    ServerResult,
+)
 from mcp.types import Tool as MCPTool
 from mcp.types import (
     ToolAnnotations,
@@ -38,10 +42,15 @@ from discord_mcp.core.server.common.context import (
     starlette_lifespan,
     stdio_lifespan,
 )
-from discord_mcp.core.server.common.middleware import RequestLoggingMiddleware
 from discord_mcp.core.server.common.prompts.manager import DiscordMCPPrompt, DiscordMCPPromptManager
 from discord_mcp.core.server.common.resources.manager import DiscordMCPFunctionResource, DiscordMCPResourceManager
 from discord_mcp.core.server.common.tools.manager import DiscordMCPToolManager
+from discord_mcp.core.server.middleware import (
+    CallNext,
+    Middleware,
+    MiddlewareContext,
+    RequestLoggingMiddleware,
+)
 from discord_mcp.persistence.adapters.sqlite_adapter import SQLiteAdapeter
 from discord_mcp.persistence.event_store import PersistentEventStore
 from discord_mcp.utils.checks import find_kwarg_by_type
@@ -62,12 +71,17 @@ logger = logging.getLogger(__name__)
 
 class DiscordMCPStarletteApp(Starlette):
     def __init__(
-        self, *args: t.Any, bot: Bot, session_manager: StreamableHTTPSessionManager | None = None, **kwargs: t.Any
+        self,
+        *args: t.Any,
+        bot: Bot,
+        mcp_server: HTTPDiscordMCPServer,
+        session_manager: StreamableHTTPSessionManager | None = None,
+        **kwargs: t.Any,
     ) -> None:
         self.bot = bot
+        self.mcp_server = mcp_server
         self.session_manager = session_manager
         super().__init__(*args, **kwargs, lifespan=starlette_lifespan)
-        self.add_middleware(RequestLoggingMiddleware)
 
 
 class BaseDiscordMCPServer(Server[DiscordMCPLifespanResult, RequestT]):
@@ -76,11 +90,31 @@ class BaseDiscordMCPServer(Server[DiscordMCPLifespanResult, RequestT]):
         *args: t.Any,
         name: str,
         bot: Bot,
-        settings: Settings[DiscordMCPLifespanResult] = Settings(lifespan=None),
+        # TODO: Move this or aquire the settings from env or click command options, and utilize them internally
+        settings: Settings[DiscordMCPLifespanResult] = Settings(
+            lifespan=None,
+            debug=False,
+            log_level="INFO",
+            host="127.0.0.1",
+            port=8000,
+            mount_path="/",
+            sse_path="/sse",
+            message_path="/messages/",
+            streamable_http_path="/mcp",
+            json_response=False,
+            stateless_http=False,
+            warn_on_duplicate_prompts=True,
+            warn_on_duplicate_resources=True,
+            warn_on_duplicate_tools=True,
+            dependencies=[],
+            auth=None,
+            transport_security=None,
+        ),
         **kwargs: t.Any,
     ) -> None:
         self.bot = bot
         self.settings = settings
+        self.middlewares: list[Middleware] = [RequestLoggingMiddleware()]
         self._tool_manager = DiscordMCPToolManager(warn_on_duplicate_tools=self.settings.warn_on_duplicate_tools)
         self._resource_manager = DiscordMCPResourceManager(
             warn_on_duplicate_resources=self.settings.warn_on_duplicate_resources
@@ -88,8 +122,23 @@ class BaseDiscordMCPServer(Server[DiscordMCPLifespanResult, RequestT]):
         self._prompt_manager = DiscordMCPPromptManager(
             warn_on_duplicate_prompts=self.settings.warn_on_duplicate_prompts
         )
+        self._original_handlers: dict[type, t.Callable[..., t.Awaitable[ServerResult]]] = {}
         super().__init__(*args, name=name, **kwargs)
+
+    def _store_original_handlers(self) -> None:
+        self._original_handlers = {k: v for k, v in self.request_handlers.items()}
+
+    def _restore_original_handlers(self) -> None:
+        self.request_handlers.clear()
+        self.request_handlers.update(self._original_handlers)
+
+    async def setup(self) -> None:
+        # Setup the internal handlers
         self._setup_handlers()
+        # Store the original handlers
+        self._store_original_handlers()
+        # Apply middlewares to the handlers
+        self._apply_middlewares()
 
     def _setup_handlers(self) -> None:
         """Set up core MCP protocol handlers."""
@@ -103,6 +152,48 @@ class BaseDiscordMCPServer(Server[DiscordMCPLifespanResult, RequestT]):
         self.read_resource()(self._read_resource)
         self.list_prompts()(self._list_prompts)
         self.get_prompt()(self._get_prompt)
+
+    def add_middleware(self, middleware: Middleware) -> None:
+        if middleware in self.middlewares:
+            logger.warning(f"Middleware {middleware} is already registered, skipping.")
+            return
+        self.middlewares.append(middleware)
+        logger.info(f"Middleware {middleware} added successfully.")
+        self._apply_middlewares()
+
+    def remove_middleware(self, middleware: Middleware | type[Middleware]) -> None:
+        """Remove a middleware from the server."""
+        original_count = len(self.middlewares)
+        if isinstance(middleware, type):
+            self.middlewares = [m for m in self.middlewares if not isinstance(m, middleware)]
+        else:
+            self.middlewares = [m for m in self.middlewares if m is not middleware]
+        if len(self.middlewares) == original_count:
+            logger.warning(f"Middleware {middleware} not found, skipping removal.")
+            return
+        logger.info(f"Middleware {middleware} removed successfully.")
+        self._apply_middlewares()
+
+    def _apply_middlewares(self) -> None:
+        if not self._original_handlers:
+            logging.error("Original handlers not backed up, cannot apply middlewares")
+            return
+
+        self._restore_original_handlers()
+
+        def make_wrapper(handler: CallNext[t.Any, t.Any]) -> t.Callable[[MiddlewareContext[t.Any]], t.Awaitable[t.Any]]:
+            async def wrapper(ctx: MiddlewareContext[t.Any]) -> t.Any:
+                return await handler(ctx.message)
+
+            return wrapper
+
+        for request_type, handler in self.request_handlers.items():
+            chain = make_wrapper(handler)
+            for mw in reversed(self.middlewares):
+                chain = functools.partial(mw, call_next=chain)
+            self.request_handlers[request_type] = chain
+
+        logger.info(f"Applied {len(self.middlewares)} middlewares to handlers.")
 
     async def _list_tools(self) -> list[MCPTool]:
         """List all available tools."""
@@ -473,6 +564,7 @@ class HTTPDiscordMCPServer(BaseDiscordMCPServer[Request]):
         starlette_app = DiscordMCPStarletteApp(
             bot=self.bot,
             session_manager=session_manager,
+            mcp_server=self,
             debug=True,
             routes=[Mount("/mcp", app=StreamableHTTPASGIApp(session_manager))],
         )
