@@ -22,6 +22,9 @@ from mcp.types import Prompt as MCPPrompt
 from mcp.types import PromptArgument as MCPPromptArgument
 from mcp.types import Resource as MCPResource
 from mcp.types import ResourceTemplate as MCPResourceTemplate
+from mcp.types import (
+    ServerResult,
+)
 from mcp.types import Tool as MCPTool
 from mcp.types import (
     ToolAnnotations,
@@ -119,8 +122,23 @@ class BaseDiscordMCPServer(Server[DiscordMCPLifespanResult, RequestT]):
         self._prompt_manager = DiscordMCPPromptManager(
             warn_on_duplicate_prompts=self.settings.warn_on_duplicate_prompts
         )
+        self._original_handlers: dict[type, t.Callable[..., t.Awaitable[ServerResult]]] = {}
         super().__init__(*args, name=name, **kwargs)
+
+    def _store_original_handlers(self) -> None:
+        self._original_handlers = {k: v for k, v in self.request_handlers.items()}
+
+    def _restore_original_handlers(self) -> None:
+        self.request_handlers.clear()
+        self.request_handlers.update(self._original_handlers)
+
+    async def setup(self) -> None:
+        # Setup the internal handlers
         self._setup_handlers()
+        # Store the original handlers
+        self._store_original_handlers()
+        # Apply middlewares to the handlers
+        self._apply_middlewares()
 
     def _setup_handlers(self) -> None:
         """Set up core MCP protocol handlers."""
@@ -136,9 +154,33 @@ class BaseDiscordMCPServer(Server[DiscordMCPLifespanResult, RequestT]):
         self.get_prompt()(self._get_prompt)
 
     def add_middleware(self, middleware: Middleware) -> None:
+        if middleware in self.middlewares:
+            logger.warning(f"Middleware {middleware} is already registered, skipping.")
+            return
         self.middlewares.append(middleware)
+        logger.info(f"Middleware {middleware} added successfully.")
+        self._apply_middlewares()
+
+    def remove_middleware(self, middleware: Middleware | type[Middleware]) -> None:
+        """Remove a middleware from the server."""
+        original_count = len(self.middlewares)
+        if isinstance(middleware, type):
+            self.middlewares = [m for m in self.middlewares if not isinstance(m, middleware)]
+        else:
+            self.middlewares = [m for m in self.middlewares if m is not middleware]
+        if len(self.middlewares) == original_count:
+            logger.warning(f"Middleware {middleware} not found, skipping removal.")
+            return
+        logger.info(f"Middleware {middleware} removed successfully.")
+        self._apply_middlewares()
 
     def _apply_middlewares(self) -> None:
+        if not self._original_handlers:
+            logging.error("Original handlers not backed up, cannot apply middlewares")
+            return
+
+        self._restore_original_handlers()
+
         def make_wrapper(handler: CallNext[t.Any, t.Any]) -> t.Callable[[MiddlewareContext[t.Any]], t.Awaitable[t.Any]]:
             async def wrapper(ctx: MiddlewareContext[t.Any]) -> t.Any:
                 return await handler(ctx.message)
@@ -150,6 +192,8 @@ class BaseDiscordMCPServer(Server[DiscordMCPLifespanResult, RequestT]):
             for mw in reversed(self.middlewares):
                 chain = functools.partial(mw, call_next=chain)
             self.request_handlers[request_type] = chain
+
+        logger.info(f"Applied {len(self.middlewares)} middlewares to handlers.")
 
     async def _list_tools(self) -> list[MCPTool]:
         """List all available tools."""

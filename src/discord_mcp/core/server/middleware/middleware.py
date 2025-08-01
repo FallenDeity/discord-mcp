@@ -78,6 +78,13 @@ class MiddlewareContext(t.Generic[MessageT]):
             event_type=MiddlewareEventTypes.REQUEST if is_request else MiddlewareEventTypes.NOTIFICATION,
         )
 
+    def __str__(self) -> str:
+        return (
+            f"{self.__class__.__name__}(context={self.context.request_context}, "
+            f"message={self.message}, method={self.method}, "
+            f"event_type={self.event_type}, timestamp={self.timestamp.isoformat()})"
+        )
+
 
 class CallNext(t.Protocol, t.Generic[MessageT, ResultT]):
     @t.overload
