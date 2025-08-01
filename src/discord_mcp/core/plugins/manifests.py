@@ -2,9 +2,27 @@ from __future__ import annotations
 
 import typing as t
 
-from mcp.types import ToolAnnotations
+from mcp.types import (
+    Completion,
+    CompletionArgument,
+    CompletionContext,
+    PromptReference,
+    ResourceTemplateReference,
+    ToolAnnotations,
+)
 
 from discord_mcp.utils.checks import autocomplete_validate_argument_name, autocomplete_validate_resource_template
+
+__all__: tuple[str, ...] = (
+    "BaseManifest",
+    "ToolManifest",
+    "ResourceManifest",
+    "PromptManifest",
+)
+
+AutocompleteCallback = t.Callable[
+    [PromptReference | ResourceTemplateReference, CompletionArgument, CompletionContext | None], Completion
+]
 
 
 class BaseManifest:
@@ -20,12 +38,15 @@ class BaseManifest:
         self.title = title
         self.description = description
 
+    def __call__(self, *_: t.Any, **__: t.Any) -> t.Any:
+        raise NotImplementedError
+
 
 class AutoCompletable:
-    autocomplete_fn: t.Callable[..., t.Any]
+    autocomplete_fn: AutocompleteCallback
 
-    def autocomplete(self, argument_name: str) -> t.Callable[..., t.Any]:
-        def decorator(fn: t.Callable[..., t.Any]) -> t.Callable[..., t.Any]:
+    def autocomplete(self, argument_name: str) -> t.Callable[[AutocompleteCallback], AutocompleteCallback]:
+        def decorator(fn: AutocompleteCallback) -> AutocompleteCallback:
             autocomplete_validate_argument_name(fn, argument_name)
             self.autocomplete_fn = fn
             return fn

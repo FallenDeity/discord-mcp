@@ -35,6 +35,7 @@ from starlette.requests import Request
 from starlette.routing import Mount
 
 from discord_mcp.core.bot import Bot
+from discord_mcp.core.plugins.manifests import AutocompleteCallback
 from discord_mcp.core.server.common.context import (
     DiscordMCPContext,
     DiscordMCPLifespanResult,
@@ -124,6 +125,7 @@ class BaseDiscordMCPServer(Server[DiscordMCPLifespanResult, RequestT]):
         )
         self._original_handlers: dict[type, t.Callable[..., t.Awaitable[ServerResult]]] = {}
         super().__init__(*args, name=name, **kwargs)
+        self._autocomplete_callbacks: dict[str, AutocompleteCallback] = dict()
 
     def _store_original_handlers(self) -> None:
         self._original_handlers = {k: v for k, v in self.request_handlers.items()}

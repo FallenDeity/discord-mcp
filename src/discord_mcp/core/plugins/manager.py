@@ -5,16 +5,63 @@ import typing as t
 
 from mcp.types import ToolAnnotations
 
-from discord_mcp.core.plugins.helpers import deco_helper
-from discord_mcp.utils.enums import DiscordMCPFunctionType
+from discord_mcp.core.plugins.manifests import BaseManifest, PromptManifest, ResourceManifest, ToolManifest
+
+AnyManifest = ToolManifest | ResourceManifest | PromptManifest
 
 
 class DiscordMCPPluginManager:
+    def __init__(self, name: str | None = None) -> None:
+        self.name = name
+        self._manifests: list[BaseManifest] = []
+
+    @t.overload
+    def _deco_helper[T: BaseManifest](
+        self,
+        name_or_fn: t.Callable[..., t.Any],
+        manifest_cls: type[T],
+        **attrs: t.Any,
+    ) -> T: ...
+
+    @t.overload
+    def _deco_helper[T: BaseManifest](
+        self,
+        name_or_fn: str | None,
+        manifest_cls: type[T],
+        **attrs: t.Any,
+    ) -> t.Callable[[t.Callable[..., t.Any]], T]: ...
+
+    def _deco_helper[T: BaseManifest](
+        self,
+        name_or_fn: t.Callable[..., t.Any] | str | None,
+        manifest_cls: type[T],
+        **attrs: t.Any,
+    ) -> T | t.Callable[[t.Callable[..., t.Any]], T]:
+        def callable_deco(fn: t.Callable[..., t.Any]) -> T:
+            manifest = manifest_cls(
+                fn=fn,
+                **attrs,
+            )
+            self._manifests.append(manifest)
+            return manifest
+
+        if isinstance(name_or_fn, types.FunctionType):
+            manifest = manifest_cls(fn=name_or_fn, **attrs)
+            self._manifests.append(manifest)
+            return manifest
+        else:
+            if isinstance(attrs.get("uri"), types.FunctionType):
+                raise RuntimeError(
+                    "For resources you must call the decorator `@register_resource(...)` because the 'uri' argument is not optional."
+                )
+
+            return callable_deco
+
     @t.overload
     def register_tool(
         self,
         name: t.Callable[..., t.Any] = ...,
-    ) -> t.Callable[..., t.Any]: ...
+    ) -> ToolManifest: ...
 
     @t.overload
     def register_tool(
@@ -24,7 +71,7 @@ class DiscordMCPPluginManager:
         description: str | None = ...,
         annotations: ToolAnnotations | None = ...,
         structured_output: bool | None = ...,
-    ) -> t.Callable[..., t.Any]: ...
+    ) -> t.Callable[[t.Callable[..., t.Any]], ToolManifest]: ...
 
     def register_tool(
         self,
@@ -33,7 +80,7 @@ class DiscordMCPPluginManager:
         description: str | None = None,
         annotations: ToolAnnotations | None = None,
         structured_output: bool | None = None,
-    ) -> t.Callable[..., t.Any]:
+    ) -> ToolManifest | t.Callable[[t.Callable[..., t.Any]], ToolManifest]:
         """Decorator to register a tool.
 
         Tools can optionally request a Context object by adding a parameter with the
@@ -65,9 +112,9 @@ class DiscordMCPPluginManager:
                 await context.report_progress(50, 100)
                 return str(x)
         """
-        return deco_helper(
+        return self._deco_helper(
             name_or_fn=name,
-            type=DiscordMCPFunctionType.TOOL,
+            manifest_cls=ToolManifest,
             name=(name if not isinstance(name, types.FunctionType) else name.__name__),
             title=title,
             description=description,
@@ -82,7 +129,7 @@ class DiscordMCPPluginManager:
         title: str | None = None,
         description: str | None = None,
         mime_type: str | None = None,
-    ) -> t.Callable[..., t.Any]:
+    ) -> t.Callable[[t.Callable[..., t.Any]], ResourceManifest]:
         """Decorator to register a function as a resource.
 
         The function will be called when the resource is read to generate its content.
@@ -120,9 +167,9 @@ class DiscordMCPPluginManager:
                 data = await fetch_weather(city)
                 return f"Weather for {city}: {data}"
         """
-        return deco_helper(
+        return self._deco_helper(
             name_or_fn=name,
-            type=DiscordMCPFunctionType.RESOURCE,
+            manifest_cls=ResourceManifest,
             name=name,
             title=title,
             description=description,
@@ -134,7 +181,7 @@ class DiscordMCPPluginManager:
     def register_prompt(
         self,
         name: t.Callable[..., t.Any] = ...,
-    ) -> t.Callable[..., t.Any]: ...
+    ) -> PromptManifest: ...
 
     @t.overload
     def register_prompt(
@@ -142,14 +189,14 @@ class DiscordMCPPluginManager:
         name: str | None = ...,
         title: str | None = None,
         description: str | None = None,
-    ) -> t.Callable[..., t.Any]: ...
+    ) -> t.Callable[[t.Callable[..., t.Any]], PromptManifest]: ...
 
     def register_prompt(
         self,
         name: t.Callable[..., t.Any] | str | None = None,
         title: str | None = None,
         description: str | None = None,
-    ) -> t.Callable[..., t.Any]:
+    ) -> PromptManifest | t.Callable[[t.Callable[..., t.Any]], PromptManifest]:
         """Decorator to register a prompt.
 
         Args:
@@ -184,9 +231,9 @@ class DiscordMCPPluginManager:
                     }
                 ]
         """
-        return deco_helper(
+        return self._deco_helper(
             name_or_fn=name,
-            type=DiscordMCPFunctionType.PROMPT,
+            manifest_cls=PromptManifest,
             name=(name if not isinstance(name, types.FunctionType) else name.__name__),
             title=title,
             description=description,
