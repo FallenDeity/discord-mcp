@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import importlib
 import functools
 import inspect
 import logging
@@ -15,14 +17,21 @@ from mcp.server.lowlevel.helper_types import ReadResourceContents
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 from mcp.types import (
     AnyFunction,
+    Completion,
+    CompletionArgument,
+    CompletionContext,
     ContentBlock,
     GetPromptResult,
 )
 from mcp.types import Prompt as MCPPrompt
 from mcp.types import PromptArgument as MCPPromptArgument
+from mcp.types import (
+    PromptReference,
+)
 from mcp.types import Resource as MCPResource
 from mcp.types import ResourceTemplate as MCPResourceTemplate
 from mcp.types import (
+    ResourceTemplateReference,
     ServerResult,
 )
 from mcp.types import Tool as MCPTool
@@ -35,7 +44,14 @@ from starlette.requests import Request
 from starlette.routing import Mount
 
 from discord_mcp.core.bot import Bot
-from discord_mcp.core.plugins.manifests import AutocompleteCallback
+from discord_mcp.core.plugins.manager import DiscordMCPPluginManager
+from discord_mcp.core.plugins.manifests import (
+    AutocompleteCallback,
+    BaseManifest,
+    PromptManifest,
+    ResourceManifest,
+    ToolManifest,
+)
 from discord_mcp.core.server.common.context import (
     DiscordMCPContext,
     DiscordMCPLifespanResult,
@@ -44,7 +60,11 @@ from discord_mcp.core.server.common.context import (
     stdio_lifespan,
 )
 from discord_mcp.core.server.common.prompts.manager import DiscordMCPPrompt, DiscordMCPPromptManager
-from discord_mcp.core.server.common.resources.manager import DiscordMCPFunctionResource, DiscordMCPResourceManager
+from discord_mcp.core.server.common.resources.manager import (
+    DiscordMCPFunctionResource,
+    DiscordMCPResourceManager,
+    DiscordMCPResourceTemplate,
+)
 from discord_mcp.core.server.common.tools.manager import DiscordMCPToolManager
 from discord_mcp.core.server.middleware import (
     CallNext,
@@ -56,6 +76,7 @@ from discord_mcp.persistence.adapters.sqlite_adapter import SQLiteAdapeter
 from discord_mcp.persistence.event_store import PersistentEventStore
 from discord_mcp.utils.checks import find_kwarg_by_type
 from discord_mcp.utils.converters import convert_name_to_title, extract_mime_type_from_fn_return
+from discord_mcp.utils.plugins import search_directory
 
 if t.TYPE_CHECKING:
     from discord_mcp.core.bot import Bot
@@ -154,6 +175,7 @@ class BaseDiscordMCPServer(Server[DiscordMCPLifespanResult, RequestT]):
         self.read_resource()(self._read_resource)
         self.list_prompts()(self._list_prompts)
         self.get_prompt()(self._get_prompt)
+        self.completion()(self._autocomplete_base_handler)
 
     def add_middleware(self, middleware: Middleware) -> None:
         if middleware in self.middlewares:
@@ -553,6 +575,109 @@ class BaseDiscordMCPServer(Server[DiscordMCPLifespanResult, RequestT]):
         except Exception as e:
             logger.exception(f"Error getting prompt {name}")
             raise ValueError(str(e))
+
+    def _add_autocomplete_callback(self, manifest: ResourceManifest | PromptManifest) -> None:
+        if manifest._autocomplete_fn:
+            name = manifest.name if isinstance(manifest, PromptManifest) else manifest.uri
+            key = f"{name}:{manifest._argument_name}"
+            self._autocomplete_callbacks[key] = manifest._autocomplete_fn
+
+    def _load_manifests(self, manifests: list[BaseManifest]) -> None:
+        for manifest in manifests:
+            if isinstance(manifest, ToolManifest):
+                self.add_tool(
+                    fn=manifest.fn,
+                    name=manifest.name,
+                    title=manifest.title,
+                    description=manifest.description,
+                    annotations=manifest.annotations,
+                    structured_output=manifest.structured_output,
+                )
+            elif isinstance(manifest, ResourceManifest):
+                # we use the decorator here to use the
+                # validations that we have already defined
+                self.resource(
+                    uri=manifest.uri,
+                    name=manifest.name,
+                    title=manifest.title,
+                    description=manifest.description,
+                    mime_type=manifest.mime_type,
+                )(manifest.fn)
+                self._add_autocomplete_callback(manifest)
+            elif isinstance(manifest, PromptManifest):
+                self.prompt(
+                    name=manifest.name,
+                    title=manifest.title,
+                    description=manifest.description,
+                )(manifest.fn)
+                self._add_autocomplete_callback(manifest)
+            else:
+                # should never happen
+                raise NotImplementedError
+
+            logger.info(f"Manifest {manifest.name} loaded")
+
+    def load_plugin(self, name: str, *, package: str | None = None) -> None:
+        mod = importlib.import_module(name, package)
+
+        for member in inspect.getmembers(mod):
+            if isinstance(member[1], DiscordMCPPluginManager):
+                manager = member[1]
+                self._load_manifests(manager._manifests)
+                break
+
+        logger.info(f"Plugin {name} loaded!")
+
+    def load_plugins(self, path: str) -> None:
+        for plugin in search_directory(path):
+            self.load_plugin(plugin)
+
+    def wrap_result(self, result: t.Any) -> Completion:
+        if isinstance(result, Completion):
+            return result
+        elif isinstance(result, (list, tuple, set)):
+            return Completion(values=list(map(str, result)))  # type: ignore
+        elif isinstance(result, dict):
+            return Completion(values=list(map(str, result.values())))  # type: ignore
+        else:
+            return Completion(values=[str(result)])
+
+    def promote_reference_to_type(
+        self, reference: PromptReference | ResourceTemplateReference
+    ) -> DiscordMCPPrompt | DiscordMCPResourceTemplate:
+        if isinstance(reference, PromptReference):
+            return t.cast(DiscordMCPPrompt, self._prompt_manager._prompts[reference.name])
+        else:
+            return t.cast(DiscordMCPResourceTemplate, self._resource_manager._templates[reference.uri])
+
+    async def _autocomplete_base_handler(
+        self,
+        reference: PromptReference | ResourceTemplateReference,
+        argument: CompletionArgument,
+        context: CompletionContext | None = None,
+    ) -> Completion:
+        logger.info(
+            f"Autocompleting for {reference.model_dump_json()} with argument {argument.model_dump_json()} and context {context.model_dump_json() if context else None}"
+        )
+        name = reference.name if isinstance(reference, PromptReference) else reference.uri
+        key = f"{name}:{argument.name}"
+        autocomplete_callback = self._autocomplete_callbacks.get(key)
+        if autocomplete_callback:
+            try:
+                promoted = self.promote_reference_to_type(reference)
+            except KeyError as e:
+                # normally should never happen if you don't play at removing
+                # handler from the managers at runtime
+                raise RuntimeError("An autocomplete for an unregistered prompt or template has been called!") from e
+
+            result = autocomplete_callback(promoted, argument, context)
+
+            if asyncio.iscoroutine(result):
+                return self.wrap_result(await result)
+            else:
+                return self.wrap_result(result)
+
+        raise RuntimeError(f"autocomplete callback missing for {name}!")
 
 
 class HTTPDiscordMCPServer(BaseDiscordMCPServer[Request]):

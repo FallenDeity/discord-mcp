@@ -3,14 +3,13 @@ from __future__ import annotations
 import typing as t
 
 from mcp.types import (
-    Completion,
     CompletionArgument,
     CompletionContext,
-    PromptReference,
-    ResourceTemplateReference,
     ToolAnnotations,
 )
 
+from discord_mcp.core.server.common.prompts.manager import DiscordMCPPrompt
+from discord_mcp.core.server.common.resources.manager import DiscordMCPResourceTemplate
 from discord_mcp.utils.checks import autocomplete_validate_argument_name, autocomplete_validate_resource_template
 
 __all__: tuple[str, ...] = (
@@ -21,7 +20,8 @@ __all__: tuple[str, ...] = (
 )
 
 AutocompleteCallback = t.Callable[
-    [PromptReference | ResourceTemplateReference, CompletionArgument, CompletionContext | None], Completion
+    [DiscordMCPPrompt | DiscordMCPResourceTemplate, CompletionArgument, CompletionContext | None],
+    t.Any,
 ]
 
 
@@ -43,12 +43,17 @@ class BaseManifest:
 
 
 class AutoCompletable:
-    autocomplete_fn: AutocompleteCallback
+    def __init__(self) -> None:
+        self._argument_name: str = ""
+        self._autocomplete_fn: AutocompleteCallback | None = None
 
     def autocomplete(self, argument_name: str) -> t.Callable[[AutocompleteCallback], AutocompleteCallback]:
+        """Provides completions for prompts and resource templates"""
+
         def decorator(fn: AutocompleteCallback) -> AutocompleteCallback:
-            autocomplete_validate_argument_name(fn, argument_name)
-            self.autocomplete_fn = fn
+            autocomplete_validate_argument_name(self.fn, argument_name)  # type: ignore
+            self._argument_name = argument_name
+            self._autocomplete_fn = fn
             return fn
 
         return decorator
@@ -83,11 +88,14 @@ class ResourceManifest(BaseManifest, AutoCompletable):
         self.uri = uri
         self.mime_type = mime_type
 
-    def autocomplete(self, argument_name: str) -> t.Callable[..., t.Any]:
-        def decorator(fn: t.Callable[..., t.Any]) -> t.Callable[..., t.Any]:
-            autocomplete_validate_resource_template(fn, self.uri)
-            autocomplete_validate_argument_name(fn, argument_name)
-            self.autocomplete_fn = fn
+    def autocomplete(self, argument_name: str) -> t.Callable[[AutocompleteCallback], AutocompleteCallback]:
+        """Provides completions for prompts and resource templates"""
+
+        def decorator(fn: AutocompleteCallback) -> AutocompleteCallback:
+            autocomplete_validate_resource_template(self.fn, self.uri)
+            autocomplete_validate_argument_name(self.fn, argument_name)
+            self._argument_name = argument_name
+            self._autocomplete_fn = fn
             return fn
 
         return decorator
