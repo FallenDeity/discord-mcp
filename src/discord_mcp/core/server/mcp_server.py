@@ -87,7 +87,26 @@ class BaseDiscordMCPServer(Server[DiscordMCPLifespanResult, RequestT]):
         *args: t.Any,
         name: str,
         bot: Bot,
-        settings: Settings[DiscordMCPLifespanResult] = Settings(lifespan=None),
+        # TODO: Move this or aquire the settings from env or click command options, and utilize them internally
+        settings: Settings[DiscordMCPLifespanResult] = Settings(
+            lifespan=None,
+            debug=False,
+            log_level="INFO",
+            host="127.0.0.1",
+            port=8000,
+            mount_path="/",
+            sse_path="/sse",
+            message_path="/messages/",
+            streamable_http_path="/mcp",
+            json_response=False,
+            stateless_http=False,
+            warn_on_duplicate_prompts=True,
+            warn_on_duplicate_resources=True,
+            warn_on_duplicate_tools=True,
+            dependencies=[],
+            auth=None,
+            transport_security=None,
+        ),
         **kwargs: t.Any,
     ) -> None:
         self.bot = bot
