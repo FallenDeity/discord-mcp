@@ -62,7 +62,7 @@ class MiddlewareContext(t.Generic[MessageT]):
     message: MessageT
     method: MiddlewareRequestMethods | MiddlewareNotificationMethods
     event_type: MiddlewareEventTypes = attrs.field(default=MiddlewareEventTypes.REQUEST)
-    timestamp: datetime.datetime = attrs.field(factory=datetime.datetime.now)
+    timestamp: datetime.datetime = attrs.field(factory=lambda: datetime.datetime.now(datetime.timezone.utc))
 
     @classmethod
     def from_message(cls, message: MessageT) -> MiddlewareContext[MessageT]:
@@ -91,7 +91,7 @@ class Middleware:
         self, message: MessageT | MiddlewareContext[MessageT], call_next: CallNext[MessageT, ResultT]
     ) -> ResultT:
         middleware_ctx = (
-            message if isinstance(message, MiddlewareContext) else MiddlewareContext[t.Any].from_message(message)
+            message if isinstance(message, MiddlewareContext) else MiddlewareContext[MessageT].from_message(message)
         )
         chain = self._dispatch(middleware_ctx, call_next)
         return await chain(middleware_ctx)
@@ -136,7 +136,7 @@ class Middleware:
                     self.on_notification,
                 )
 
-        if not specific_handler:
+        if specific_handler is None:
             raise ValueError(f"Unsupported method: {ctx.method} for event type: {ctx.event_type}")
 
         handler = functools.partial(specific_handler, call_next=call_next)
