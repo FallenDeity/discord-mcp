@@ -7,6 +7,7 @@ from mcp.types import ToolAnnotations
 
 from discord_mcp.core.server.common.manifests import BaseManifest, PromptManifest, ResourceManifest, ToolManifest
 
+ManifestT = t.TypeVar("ManifestT", bound=BaseManifest)
 AnyManifest = ToolManifest | ResourceManifest | PromptManifest
 
 
@@ -16,28 +17,28 @@ class DiscordMCPPluginManager:
         self._manifests: list[BaseManifest] = []
 
     @t.overload
-    def _deco_helper[T: BaseManifest](
+    def _deco_helper(
         self,
         name_or_fn: t.Callable[..., t.Any],
-        manifest_cls: type[T],
+        manifest_cls: type[ManifestT],
         **attrs: t.Any,
-    ) -> T: ...
+    ) -> ManifestT: ...
 
     @t.overload
-    def _deco_helper[T: BaseManifest](
+    def _deco_helper(
         self,
         name_or_fn: str | None,
-        manifest_cls: type[T],
+        manifest_cls: type[ManifestT],
         **attrs: t.Any,
-    ) -> t.Callable[[t.Callable[..., t.Any]], T]: ...
+    ) -> t.Callable[[t.Callable[..., t.Any]], ManifestT]: ...
 
-    def _deco_helper[T: BaseManifest](
+    def _deco_helper(
         self,
         name_or_fn: t.Callable[..., t.Any] | str | None,
-        manifest_cls: type[T],
+        manifest_cls: type[ManifestT],
         **attrs: t.Any,
-    ) -> T | t.Callable[[t.Callable[..., t.Any]], T]:
-        def callable_deco(fn: t.Callable[..., t.Any]) -> T:
+    ) -> ManifestT | t.Callable[[t.Callable[..., t.Any]], ManifestT]:
+        def callable_deco(fn: t.Callable[..., t.Any]) -> ManifestT:
             manifest = manifest_cls(
                 fn=fn,
                 **attrs,
@@ -52,7 +53,7 @@ class DiscordMCPPluginManager:
         else:
             if isinstance(attrs.get("uri"), types.FunctionType):
                 raise RuntimeError(
-                    "For resources you must call the decorator `@register_resource(...)` because the 'uri' argument is not optional."
+                    "Incorrect usage: You must call the resource decorator with required arguments, e.g. `@register_resource(uri=...)`. The 'uri' argument is not optional. Example:\n\n    @register_resource(uri='your_resource_uri')\n    def my_resource(...):\n        ...\n"
                 )
 
             return callable_deco
