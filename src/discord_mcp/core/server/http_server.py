@@ -5,7 +5,6 @@ import typing as t
 
 import pydantic
 import uvicorn
-from mcp.types import Completion, CompletionArgument, CompletionContext, PromptReference, ResourceTemplateReference
 
 from discord_mcp.core.server.common.context import DiscordMCPContext
 from discord_mcp.core.server.mcp_server import HTTPDiscordMCPServer
@@ -134,22 +133,7 @@ def run_server(bot: Bot) -> None:
         )
         return f"Please create a user {user_info.model_dump_json()} report. Request ID: {ctx.request_id}"
 
-    # TODO: Build some parameter autocompletion logic for resource templates and prompts
-    # maybe use name to look up the prompt or resource and check if they have any registered
-    # autocompletion callbacks if they do, call them with the argument and context
-    @mcp.completion()
-    async def autocomplete(  # type: ignore[misc]
-        reference: PromptReference | ResourceTemplateReference,
-        argument: CompletionArgument,
-        context: CompletionContext | None = None,
-    ) -> Completion:
-        """Provide autocompletion for prompts and resources."""
-        # Implement your autocompletion logic here
-        # "Autocompleting for {\"type\":\"ref/prompt\",\"name\":\"generate_report_request\"} with argument {\"name\":\"user_id\",\"value\":\"7\"} and context None"
-        logger.info(
-            f"Autocompleting for {reference.model_dump_json()} with argument {argument.model_dump_json()} and context {context.model_dump_json() if context else None}"
-        )
-        return Completion(values=["656838010532265994"])
+    mcp.load_plugins("src/discord_mcp/core/server/p_test")
 
     uvicorn.run(
         mcp.streamable_http_app,

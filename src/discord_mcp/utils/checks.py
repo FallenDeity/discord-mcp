@@ -4,11 +4,15 @@ from types import UnionType
 
 from pydantic import validate_call
 
+from discord_mcp.core.server.common.context import DiscordMCPContext
+
 __all__: tuple[str, ...] = (
     "issubclass_safe",
     "is_class_member_of_type",
     "find_kwarg_by_type",
     "context_safe_validate_call",
+    "autocomplete_validate_argument_name",
+    "autocomplete_validate_resource_template",
 )
 
 
@@ -91,3 +95,29 @@ def context_safe_validate_call(fn: t.Callable[..., t.Any]) -> t.Callable[..., t.
     validator.__name__ = fn.__name__
 
     return validate_call(validator)
+
+
+def autocomplete_validate_argument_name(
+    fn: t.Callable[..., t.Any],
+    argument_name: str,
+) -> None:
+    sig = inspect.signature(fn)
+    if argument_name not in sig.parameters:
+        raise RuntimeError(
+            f"'autocomplete' is completing {argument_name!r} but it's not an argument of {fn.__name__!r}!"
+        )
+
+
+def autocomplete_validate_resource_template(
+    fn: t.Callable[..., t.Any],
+    uri: str,
+) -> None:
+    has_uri_params = "{" in uri and "}" in uri
+    has_func_params = any(
+        p for p in inspect.signature(fn).parameters.values() if p.name != find_kwarg_by_type(fn, DiscordMCPContext)
+    )
+
+    if not (has_uri_params or has_func_params):
+        raise RuntimeError(
+            "'autocomplete' cannot be used on normal resources. It can only be used on resource templates and prompts."
+        )

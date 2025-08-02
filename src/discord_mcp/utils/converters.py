@@ -5,8 +5,11 @@ import typing as t
 
 import docstring_parser
 import pydantic
+import pydantic_core
 from mcp.server.fastmcp import Context
 
+from discord_mcp.core.server.common.context import DiscordMCPContext
+from discord_mcp.utils.checks import find_kwarg_by_type
 from discord_mcp.utils.enums import ResourceReturnType
 
 __all__: tuple[str, ...] = (
@@ -235,3 +238,50 @@ async def process_callable_result(fn: t.Callable[..., t.Any], params: dict[str, 
     if inspect.iscoroutine(result):
         result = await result
     return result
+
+
+def convert_string_arguments(fn: t.Callable[..., t.Any], kwargs: dict[str, t.Any]) -> dict[str, t.Any]:
+    """Convert string arguments to expected types based on function signature."""
+
+    sig = inspect.signature(fn)
+    converted_kwargs: dict[str, t.Any] = {}
+
+    # Find context parameter name if any
+    context_param_name = find_kwarg_by_type(fn, DiscordMCPContext)
+
+    for param_name, param_value in kwargs.items():
+        if param_name in sig.parameters:
+            param = sig.parameters[param_name]
+
+            # Skip Context parameters - they're handled separately
+            if param_name == context_param_name:
+                converted_kwargs[param_name] = param_value
+                continue
+
+            # If parameter has no annotation or annotation is str, pass as-is
+            if param.annotation == inspect.Parameter.empty or param.annotation is str:
+                converted_kwargs[param_name] = param_value
+            # If argument is not a string, pass as-is (already properly typed)
+            elif not isinstance(param_value, str):
+                converted_kwargs[param_name] = param_value
+            else:
+                # Try to convert string argument using type adapter
+                try:
+                    adapter = get_cached_typeadapter(param.annotation)
+                    # Try JSON parsing first for complex types
+                    try:
+                        converted_kwargs[param_name] = adapter.validate_json(param_value)
+                    except (ValueError, TypeError, pydantic_core.ValidationError):
+                        # Fallback to direct validation
+                        converted_kwargs[param_name] = adapter.validate_python(param_value)
+                except (ValueError, TypeError, pydantic_core.ValidationError) as e:
+                    # If conversion fails, provide informative error
+                    raise RuntimeError(
+                        f"Could not convert argument '{param_name}' with value '{param_value}' "
+                        f"to expected type {param.annotation}. Error: {e}"
+                    )
+        else:
+            # Parameter not in function signature, pass as-is
+            converted_kwargs[param_name] = param_value
+
+    return converted_kwargs

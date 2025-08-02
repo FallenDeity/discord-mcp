@@ -1,0 +1,75 @@
+from __future__ import annotations
+
+import typing as t
+
+from mcp.types import ToolAnnotations
+
+from discord_mcp.core.server.common.autocomplete import AutoCompletable, AutocompleteHandler
+
+__all__: tuple[str, ...] = (
+    "BaseManifest",
+    "ToolManifest",
+    "ResourceManifest",
+    "PromptManifest",
+)
+
+
+class BaseManifest:
+    def __init__(
+        self,
+        fn: t.Callable[..., t.Any],
+        name: str | None = None,
+        title: str | None = None,
+        description: str | None = None,
+    ) -> None:
+        self.fn = fn
+        self.name = name
+        self.title = title
+        self.description = description
+
+    def __call__(self, *_: t.Any, **__: t.Any) -> t.Any:
+        raise NotImplementedError
+
+
+class ToolManifest(BaseManifest):
+    def __init__(
+        self,
+        fn: t.Callable[..., t.Any],
+        name: str | None = None,
+        title: str | None = None,
+        description: str | None = None,
+        annotations: ToolAnnotations | None = None,
+        structured_output: bool | None = None,
+    ) -> None:
+        super().__init__(fn, name, title, description)
+        self.annotations = annotations
+        self.structured_output = structured_output
+
+
+class ResourceManifest(BaseManifest, AutoCompletable):
+    def __init__(
+        self,
+        fn: t.Callable[..., t.Any],
+        uri: str,
+        name: str | None = None,
+        title: str | None = None,
+        description: str | None = None,
+        mime_type: str | None = None,
+    ) -> None:
+        super().__init__(fn, name, title, description)
+        self.uri = uri
+        self.mime_type = mime_type
+        self.autocomplete_handler = AutocompleteHandler(self)
+
+
+class PromptManifest(BaseManifest, AutoCompletable):
+    def __init__(
+        self,
+        fn: t.Callable[..., t.Any],
+        name: str | None = None,
+        title: str | None = None,
+        description: str | None = None,
+    ) -> None:
+        super().__init__(fn, name, title, description)
+        self.name = name or fn.__name__
+        self.autocomplete_handler = AutocompleteHandler(self)

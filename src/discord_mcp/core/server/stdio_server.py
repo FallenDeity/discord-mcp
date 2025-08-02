@@ -26,4 +26,4 @@ async def run_server(bot: Bot) -> None:
         return f"Latency: {ctx.request_context.lifespan_context.bot.latency * 1000:.2f} ms"
 
     async with stdio_server() as (read_stream, write_stream):
-        await mcp.run(read_stream, write_stream, mcp.create_initialization_options())
+        await mcp.run(read_stream, write_stream, mcp.create_initialization_options(), raise_exceptions=True)
