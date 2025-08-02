@@ -311,7 +311,8 @@ class BaseDiscordMCPServer(Server[DiscordMCPLifespanResult, RequestT]):
         description: str | None = None,
         annotations: ToolAnnotations | None = None,
         structured_output: bool | None = None,
-    ) -> t.Callable[[AnyFunction], AnyFunction]:
+        enabled: bool = True,
+    ) -> t.Callable[[t.Callable[..., t.Any]], ToolManifest]:
         """Decorator to register a tool.
 
         Tools can optionally request a Context object by adding a parameter with the
@@ -349,16 +350,26 @@ class BaseDiscordMCPServer(Server[DiscordMCPLifespanResult, RequestT]):
                 "The @tool decorator was used incorrectly. Did you forget to call it? Use @tool() instead of @tool"
             )
 
-        def decorator(fn: AnyFunction) -> AnyFunction:
-            self.add_tool(
-                fn,
+        def decorator(fn: t.Callable[..., t.Any]) -> ToolManifest:
+            if enabled:
+                self.add_tool(
+                    fn,
+                    name=name,
+                    title=title,
+                    description=description,
+                    annotations=annotations,
+                    structured_output=structured_output,
+                )
+            manifest = ToolManifest(
+                fn=fn,
                 name=name,
                 title=title,
                 description=description,
                 annotations=annotations,
                 structured_output=structured_output,
+                enabled=enabled,
             )
-            return fn
+            return manifest
 
         return decorator
 
@@ -373,7 +384,8 @@ class BaseDiscordMCPServer(Server[DiscordMCPLifespanResult, RequestT]):
         title: str | None = None,
         description: str | None = None,
         mime_type: str | None = None,
-    ) -> t.Callable[[AnyFunction], AnyFunction]:
+        enabled: bool = True,
+    ) -> t.Callable[[t.Callable[..., t.Any]], ResourceManifest]:
         """Decorator to register a function as a resource.
 
         The function will be called when the resource is read to generate its content.
@@ -418,7 +430,7 @@ class BaseDiscordMCPServer(Server[DiscordMCPLifespanResult, RequestT]):
                 "Did you forget to call it? Use @resource('uri') instead of @resource"
             )
 
-        def decorator(fn: AnyFunction) -> AnyFunction:
+        def decorator(fn: t.Callable[..., t.Any]) -> ResourceManifest:
             # Check if this should be a template
             has_uri_params = "{" in uri and "}" in uri
             has_func_params = any(
@@ -446,14 +458,15 @@ class BaseDiscordMCPServer(Server[DiscordMCPLifespanResult, RequestT]):
                     )
 
                 # Register as template
-                self._resource_manager.add_template(
-                    fn=fn,
-                    uri_template=uri,
-                    name=name,
-                    title=title,
-                    description=description,
-                    mime_type=mime_type,
-                )
+                if enabled:
+                    self._resource_manager.add_template(
+                        fn=fn,
+                        uri_template=uri,
+                        name=name,
+                        title=title,
+                        description=description,
+                        mime_type=mime_type,
+                    )
             else:
                 # Register as regular resource
                 resource = DiscordMCPFunctionResource.from_function(
@@ -464,8 +477,19 @@ class BaseDiscordMCPServer(Server[DiscordMCPLifespanResult, RequestT]):
                     description=description,
                     mime_type=mime_type,
                 )
-                self.add_resource(resource)
-            return fn
+                if enabled:
+                    self.add_resource(resource)
+
+            manifest = ResourceManifest(
+                fn=fn,
+                uri=uri,
+                name=name,
+                title=title,
+                description=description,
+                mime_type=mime_type,
+                enabled=enabled,
+            )
+            return manifest
 
         return decorator
 
@@ -492,8 +516,12 @@ class BaseDiscordMCPServer(Server[DiscordMCPLifespanResult, RequestT]):
         self._prompt_manager.add_prompt(prompt)
 
     def prompt(
-        self, name: str | None = None, title: str | None = None, description: str | None = None
-    ) -> t.Callable[[AnyFunction], AnyFunction]:
+        self,
+        name: str | None = None,
+        title: str | None = None,
+        description: str | None = None,
+        enabled: bool = True,
+    ) -> t.Callable[[t.Callable[..., t.Any]], PromptManifest]:
         """Decorator to register a prompt.
 
         Args:
@@ -535,10 +563,19 @@ class BaseDiscordMCPServer(Server[DiscordMCPLifespanResult, RequestT]):
                 "Did you forget to call it? Use @prompt() instead of @prompt"
             )
 
-        def decorator(func: AnyFunction) -> AnyFunction:
+        def decorator(func: t.Callable[..., t.Any]) -> PromptManifest:
             prompt = DiscordMCPPrompt.from_function(func, name=name, title=title, description=description)
-            self.add_prompt(prompt)
-            return func
+            if enabled:
+                self.add_prompt(prompt)
+
+            manifest = PromptManifest(
+                fn=func,
+                name=name,
+                description=description,
+                title=title,
+                enabled=enabled,
+            )
+            return manifest
 
         return decorator
 
@@ -587,32 +624,35 @@ class BaseDiscordMCPServer(Server[DiscordMCPLifespanResult, RequestT]):
     def _load_manifests(self, manifests: list[BaseManifest]) -> None:
         for manifest in manifests:
             if isinstance(manifest, ToolManifest):
-                self.add_tool(
-                    fn=manifest.fn,
-                    name=manifest.name,
-                    title=manifest.title,
-                    description=manifest.description,
-                    annotations=manifest.annotations,
-                    structured_output=manifest.structured_output,
-                )
+                if manifest.enabled:
+                    self.add_tool(
+                        fn=manifest.fn,
+                        name=manifest.name,
+                        title=manifest.title,
+                        description=manifest.description,
+                        annotations=manifest.annotations,
+                        structured_output=manifest.structured_output,
+                    )
             elif isinstance(manifest, ResourceManifest):
                 # we use the decorator here to use the
                 # validations that we have already defined
-                self.resource(
-                    uri=manifest.uri,
-                    name=manifest.name,
-                    title=manifest.title,
-                    description=manifest.description,
-                    mime_type=manifest.mime_type,
-                )(manifest.fn)
-                self._add_autocomplete_callback(manifest)
+                if manifest.enabled:
+                    self.resource(
+                        uri=manifest.uri,
+                        name=manifest.name,
+                        title=manifest.title,
+                        description=manifest.description,
+                        mime_type=manifest.mime_type,
+                    )(manifest.fn)
+                    self._add_autocomplete_callback(manifest)
             elif isinstance(manifest, PromptManifest):
-                self.prompt(
-                    name=manifest.name,
-                    title=manifest.title,
-                    description=manifest.description,
-                )(manifest.fn)
-                self._add_autocomplete_callback(manifest)
+                if manifest.enabled:
+                    self.prompt(
+                        name=manifest.name,
+                        title=manifest.title,
+                        description=manifest.description,
+                    )(manifest.fn)
+                    self._add_autocomplete_callback(manifest)
             else:
                 # should never happen
                 raise NotImplementedError
@@ -648,7 +688,7 @@ class BaseDiscordMCPServer(Server[DiscordMCPLifespanResult, RequestT]):
         if autocomplete_obj:
             return await autocomplete_obj(reference, argument, context)
 
-        raise RuntimeError(f"autocomplete handler missing for {name}!")
+        raise RuntimeError(f"autocomplete handler missing for {name}.")
 
 
 class HTTPDiscordMCPServer(BaseDiscordMCPServer[Request]):
