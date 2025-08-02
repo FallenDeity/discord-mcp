@@ -17,6 +17,11 @@ if t.TYPE_CHECKING:
     from discord_mcp.core.bot import Bot
     from discord_mcp.core.server.mcp_server import BaseDiscordMCPServer, DiscordMCPStarletteApp, STDIODiscordMCPServer
 
+    ServerT = TypeVar("ServerT", bound=BaseDiscordMCPServer[t.Any], default=BaseDiscordMCPServer[t.Any])
+else:
+    # to avoid importing BaseDiscordMCPServer at runtime causing circular imports errors
+    ServerT = TypeVar("ServerT")
+
 
 __all__: tuple[str, ...] = (
     "DiscordMCPLifespanResult",
@@ -28,7 +33,6 @@ __all__: tuple[str, ...] = (
 
 
 logger = logging.getLogger(__name__)
-ServerT = TypeVar("ServerT", bound=BaseDiscordMCPServer[t.Any], default=BaseDiscordMCPServer[t.Any])
 
 
 @attrs.define
