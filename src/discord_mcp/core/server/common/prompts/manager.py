@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import inspect
 import logging
 import typing as t
 
@@ -13,6 +12,7 @@ from discord_mcp.core.server.common.context import DiscordMCPContext, get_contex
 from discord_mcp.utils.checks import context_safe_validate_call, find_kwarg_by_type
 from discord_mcp.utils.converters import (
     convert_name_to_title,
+    convert_string_arguments,
     get_cached_typeadapter,
     process_callable_result,
     prune_param,
@@ -83,52 +83,6 @@ class DiscordMCPPrompt(Prompt):
             fn=validated_fn,
         )
 
-    def _convert_string_arguments(self, kwargs: dict[str, t.Any]) -> dict[str, t.Any]:
-        """Convert string arguments to expected types based on function signature."""
-
-        sig = inspect.signature(self.fn)
-        converted_kwargs: dict[str, t.Any] = {}
-
-        # Find context parameter name if any
-        context_param_name = find_kwarg_by_type(self.fn, DiscordMCPContext)
-
-        for param_name, param_value in kwargs.items():
-            if param_name in sig.parameters:
-                param = sig.parameters[param_name]
-
-                # Skip Context parameters - they're handled separately
-                if param_name == context_param_name:
-                    converted_kwargs[param_name] = param_value
-                    continue
-
-                # If parameter has no annotation or annotation is str, pass as-is
-                if param.annotation == inspect.Parameter.empty or param.annotation is str:
-                    converted_kwargs[param_name] = param_value
-                # If argument is not a string, pass as-is (already properly typed)
-                elif not isinstance(param_value, str):
-                    converted_kwargs[param_name] = param_value
-                else:
-                    # Try to convert string argument using type adapter
-                    try:
-                        adapter = get_cached_typeadapter(param.annotation)
-                        # Try JSON parsing first for complex types
-                        try:
-                            converted_kwargs[param_name] = adapter.validate_json(param_value)
-                        except (ValueError, TypeError, pydantic_core.ValidationError):
-                            # Fallback to direct validation
-                            converted_kwargs[param_name] = adapter.validate_python(param_value)
-                    except (ValueError, TypeError, pydantic_core.ValidationError) as e:
-                        # If conversion fails, provide informative error
-                        raise PromptError(
-                            f"Could not convert argument '{param_name}' with value '{param_value}' "
-                            f"to expected type {param.annotation}. Error: {e}"
-                        )
-            else:
-                # Parameter not in function signature, pass as-is
-                converted_kwargs[param_name] = param_value
-
-        return converted_kwargs
-
     async def render(self, arguments: dict[str, t.Any] | None = None) -> list[Message]:
         """Render the prompt with arguments."""
         # Validate required arguments
@@ -145,7 +99,7 @@ class DiscordMCPPrompt(Prompt):
             # Call function and check if result is a coroutine
             context_kwarg = find_kwarg_by_type(self.fn, DiscordMCPContext)
             arguments |= {context_kwarg: get_context()} if context_kwarg else {}
-            result = await process_callable_result(self.fn, self._convert_string_arguments(arguments))
+            result = await process_callable_result(self.fn, convert_string_arguments(self.fn, arguments))
 
             # Validate messages
             if not isinstance(result, list | tuple):
