@@ -5,7 +5,7 @@ import typing as t
 
 from mcp.types import ToolAnnotations
 
-from discord_mcp.core.plugins.manifests import BaseManifest, PromptManifest, ResourceManifest, ToolManifest
+from discord_mcp.core.server.common.manifests import BaseManifest, PromptManifest, ResourceManifest, ToolManifest
 
 AnyManifest = ToolManifest | ResourceManifest | PromptManifest
 

@@ -44,19 +44,19 @@ from starlette.routing import Mount
 
 from discord_mcp.core.bot import Bot
 from discord_mcp.core.plugins.manager import DiscordMCPPluginManager
-from discord_mcp.core.plugins.manifests import (
-    AutocompleteHandler,
-    BaseManifest,
-    PromptManifest,
-    ResourceManifest,
-    ToolManifest,
-)
+from discord_mcp.core.server.common.autocomplete import AutocompleteHandler
 from discord_mcp.core.server.common.context import (
     DiscordMCPContext,
     DiscordMCPLifespanResult,
     get_context,
     starlette_lifespan,
     stdio_lifespan,
+)
+from discord_mcp.core.server.common.manifests import (
+    BaseManifest,
+    PromptManifest,
+    ResourceManifest,
+    ToolManifest,
 )
 from discord_mcp.core.server.common.prompts.manager import DiscordMCPPrompt, DiscordMCPPromptManager
 from discord_mcp.core.server.common.resources.manager import (

@@ -7,9 +7,10 @@ import logging
 import typing as t
 
 import attrs
-from mcp.server.fastmcp.server import Context
+from mcp.server.fastmcp.server import Context, FastMCP
 from mcp.server.lowlevel.server import request_ctx
 from mcp.server.session import ServerSession
+from mcp.shared.context import RequestContext
 from starlette.requests import Request
 from typing_extensions import TypeVar
 
@@ -48,6 +49,15 @@ class DiscordMCPLifespanResult(t.Generic[ServerT], collections.UserDict[str, t.A
 
 
 class DiscordMCPContext(Context[ServerSession, DiscordMCPLifespanResult[ServerT], t.Any]):
+    def __init__(
+        self,
+        *,
+        request_context: RequestContext[ServerSession, t.Any, t.Any] | None,
+        fastmcp: FastMCP | None,
+        **kwargs: t.Any,
+    ) -> None:
+        super().__init__(request_context=request_context, fastmcp=fastmcp, **kwargs)
+
     @property
     def bot(self) -> Bot:
         """Returns :class:`Bot`: a shortcut property, this is equivalent to `DiscordMCPContext.request_context.lifespan_context.bot`."""
@@ -115,7 +125,7 @@ def get_context() -> DiscordMCPContext:
         request_context = request_ctx.get()
     except LookupError:
         request_context = None
-    ctx = DiscordMCPContext(_request_context=request_context, _fastmcp=None)
+    ctx = DiscordMCPContext(request_context=request_context, fastmcp=None)
     if ctx.request_context and ctx.request_context.request and isinstance(ctx.request_context.request, Request):
         ctx.request_context.lifespan_context = t.cast(DiscordMCPLifespanResult, ctx.request_context.request.state)
     return ctx

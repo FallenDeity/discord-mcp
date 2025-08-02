@@ -9,42 +9,35 @@ from mcp.types import (
     CompletionContext,
     PromptReference,
     ResourceTemplateReference,
-    ToolAnnotations,
 )
 
 from discord_mcp.core.server.common.context import DiscordMCPContext, get_context
 from discord_mcp.core.server.common.prompts.manager import DiscordMCPPrompt
 from discord_mcp.core.server.common.resources.manager import DiscordMCPResourceTemplate
 from discord_mcp.utils.checks import autocomplete_validate_argument_name, autocomplete_validate_resource_template
+from discord_mcp.utils.converters import convert_string_arguments
+
+if t.TYPE_CHECKING:
+    from discord_mcp.core.server.common.manifests import PromptManifest, ResourceManifest
 
 __all__: tuple[str, ...] = (
-    "BaseManifest",
-    "ToolManifest",
-    "ResourceManifest",
-    "PromptManifest",
+    "AutoCompletable",
+    "AutocompleteHandler",
 )
 
 AutocompleteCallback = t.Callable[
-    [DiscordMCPPrompt | DiscordMCPResourceTemplate, CompletionArgument, CompletionContext | None],
+    [DiscordMCPPrompt | DiscordMCPResourceTemplate, t.Any, dict[str, t.Any] | None],
     t.Any,
 ]
 
 
-class BaseManifest:
-    def __init__(
-        self,
-        fn: t.Callable[..., t.Any],
-        name: str | None = None,
-        title: str | None = None,
-        description: str | None = None,
-    ) -> None:
-        self.fn = fn
-        self.name = name
-        self.title = title
-        self.description = description
+# mixin to be used in conjunction to AutocompleteHandler
+class AutoCompletable:
+    autocomplete_handler: AutocompleteHandler
 
-    def __call__(self, *_: t.Any, **__: t.Any) -> t.Any:
-        raise NotImplementedError
+    def autocomplete(self, argument_name: str) -> t.Callable[[AutocompleteCallback], AutocompleteCallback]:
+        """Provides completions for prompts and resource templates"""
+        return self.autocomplete_handler.autocomplete(argument_name)
 
 
 class AutocompleteHandler:
@@ -89,8 +82,14 @@ class AutocompleteHandler:
             # handler from the managers at runtime
             raise RuntimeError("An autocomplete for an unregistered prompt or template has been called!") from e
 
+        promoted_argument_value = convert_string_arguments(promoted.fn, {argument.name: argument.value})[argument.name]
+        if context and context.arguments:
+            promoted_context_args = convert_string_arguments(promoted.fn, context.arguments)
+        else:
+            promoted_context_args = None
+
         if self._autocomplete_fns:
-            result = self._autocomplete_fns[argument.name](promoted, argument, context)
+            result = self._autocomplete_fns[argument.name](promoted, promoted_argument_value, promoted_context_args)
         else:
             raise RuntimeError(f"autocomplete callback is `None` for {promoted.name}!")
 
@@ -101,6 +100,8 @@ class AutocompleteHandler:
 
     def autocomplete(self, argument_name: str) -> t.Callable[[AutocompleteCallback], AutocompleteCallback]:
         """Provides completions for prompts and resource templates"""
+        # avoid circular import
+        from discord_mcp.core.server.common.manifests import ResourceManifest
 
         def decorator(fn: AutocompleteCallback) -> AutocompleteCallback:
             if isinstance(self.manifest, ResourceManifest):
@@ -110,56 +111,3 @@ class AutocompleteHandler:
             return fn
 
         return decorator
-
-
-class ToolManifest(BaseManifest):
-    def __init__(
-        self,
-        fn: t.Callable[..., t.Any],
-        name: str | None = None,
-        title: str | None = None,
-        description: str | None = None,
-        annotations: ToolAnnotations | None = None,
-        structured_output: bool | None = None,
-    ) -> None:
-        super().__init__(fn, name, title, description)
-        self.annotations = annotations
-        self.structured_output = structured_output
-
-
-class ResourceManifest(BaseManifest):
-    def __init__(
-        self,
-        fn: t.Callable[..., t.Any],
-        uri: str,
-        name: str | None = None,
-        title: str | None = None,
-        description: str | None = None,
-        mime_type: str | None = None,
-    ) -> None:
-        super().__init__(fn, name, title, description)
-        self.uri = uri
-        self.mime_type = mime_type
-        self.autocomplete_handler = AutocompleteHandler(self)
-        self.autocomplete_handler.autocomplete = self.autocomplete
-
-    @property
-    def autocomplete(self):
-        return self.autocomplete_handler.autocomplete
-
-
-class PromptManifest(BaseManifest):
-    def __init__(
-        self,
-        fn: t.Callable[..., t.Any],
-        name: str | None = None,
-        title: str | None = None,
-        description: str | None = None,
-    ) -> None:
-        super().__init__(fn, name, title, description)
-        self.name = name or fn.__name__
-        self.autocomplete_handler = AutocompleteHandler(self)
-
-    @property
-    def autocomplete(self):
-        return self.autocomplete_handler.autocomplete
