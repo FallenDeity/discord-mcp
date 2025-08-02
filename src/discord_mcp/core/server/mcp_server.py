@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-import asyncio
-import importlib
 import functools
+import importlib
 import inspect
 import logging
 import re
@@ -46,7 +45,7 @@ from starlette.routing import Mount
 from discord_mcp.core.bot import Bot
 from discord_mcp.core.plugins.manager import DiscordMCPPluginManager
 from discord_mcp.core.plugins.manifests import (
-    AutocompleteCallback,
+    AutocompleteHandler,
     BaseManifest,
     PromptManifest,
     ResourceManifest,
@@ -63,7 +62,6 @@ from discord_mcp.core.server.common.prompts.manager import DiscordMCPPrompt, Dis
 from discord_mcp.core.server.common.resources.manager import (
     DiscordMCPFunctionResource,
     DiscordMCPResourceManager,
-    DiscordMCPResourceTemplate,
 )
 from discord_mcp.core.server.common.tools.manager import DiscordMCPToolManager
 from discord_mcp.core.server.middleware import (
@@ -82,7 +80,12 @@ if t.TYPE_CHECKING:
     from discord_mcp.core.bot import Bot
 
 
-__all__: tuple[str, ...] = ("DiscordMCPStarletteApp", "BaseDiscordMCPServer", "HTTPDiscordMCPServer")
+__all__: tuple[str, ...] = (
+    "DiscordMCPStarletteApp",
+    "BaseDiscordMCPServer",
+    "HTTPDiscordMCPServer",
+    "STDIODiscordMCPServer",
+)
 
 
 RequestT = t.TypeVar("RequestT", bound=t.Any)
@@ -146,7 +149,7 @@ class BaseDiscordMCPServer(Server[DiscordMCPLifespanResult, RequestT]):
         )
         self._original_handlers: dict[type, t.Callable[..., t.Awaitable[ServerResult]]] = {}
         super().__init__(*args, name=name, **kwargs)
-        self._autocomplete_callbacks: dict[str, AutocompleteCallback] = dict()
+        self._autocompleters: dict[str, AutocompleteHandler] = dict()
 
     def _store_original_handlers(self) -> None:
         self._original_handlers = {k: v for k, v in self.request_handlers.items()}
@@ -577,10 +580,9 @@ class BaseDiscordMCPServer(Server[DiscordMCPLifespanResult, RequestT]):
             raise ValueError(str(e))
 
     def _add_autocomplete_callback(self, manifest: ResourceManifest | PromptManifest) -> None:
-        if manifest._autocomplete_fn:
+        if manifest.autocomplete_handler._autocomplete_fns:
             name = manifest.name if isinstance(manifest, PromptManifest) else manifest.uri
-            key = f"{name}:{manifest._argument_name}"
-            self._autocomplete_callbacks[key] = manifest._autocomplete_fn
+            self._autocompleters[name] = manifest.autocomplete_handler
 
     def _load_manifests(self, manifests: list[BaseManifest]) -> None:
         for manifest in manifests:
@@ -632,24 +634,6 @@ class BaseDiscordMCPServer(Server[DiscordMCPLifespanResult, RequestT]):
         for plugin in search_directory(path):
             self.load_plugin(plugin)
 
-    def wrap_result(self, result: t.Any) -> Completion:
-        if isinstance(result, Completion):
-            return result
-        elif isinstance(result, (list, tuple, set)):
-            return Completion(values=list(map(str, result)))  # type: ignore
-        elif isinstance(result, dict):
-            return Completion(values=list(map(str, result.values())))  # type: ignore
-        else:
-            return Completion(values=[str(result)])
-
-    def promote_reference_to_type(
-        self, reference: PromptReference | ResourceTemplateReference
-    ) -> DiscordMCPPrompt | DiscordMCPResourceTemplate:
-        if isinstance(reference, PromptReference):
-            return t.cast(DiscordMCPPrompt, self._prompt_manager._prompts[reference.name])
-        else:
-            return t.cast(DiscordMCPResourceTemplate, self._resource_manager._templates[reference.uri])
-
     async def _autocomplete_base_handler(
         self,
         reference: PromptReference | ResourceTemplateReference,
@@ -660,24 +644,11 @@ class BaseDiscordMCPServer(Server[DiscordMCPLifespanResult, RequestT]):
             f"Autocompleting for {reference.model_dump_json()} with argument {argument.model_dump_json()} and context {context.model_dump_json() if context else None}"
         )
         name = reference.name if isinstance(reference, PromptReference) else reference.uri
-        key = f"{name}:{argument.name}"
-        autocomplete_callback = self._autocomplete_callbacks.get(key)
-        if autocomplete_callback:
-            try:
-                promoted = self.promote_reference_to_type(reference)
-            except KeyError as e:
-                # normally should never happen if you don't play at removing
-                # handler from the managers at runtime
-                raise RuntimeError("An autocomplete for an unregistered prompt or template has been called!") from e
+        autocomplete_obj = self._autocompleters.get(name)
+        if autocomplete_obj:
+            return await autocomplete_obj(reference, argument, context)
 
-            result = autocomplete_callback(promoted, argument, context)
-
-            if asyncio.iscoroutine(result):
-                return self.wrap_result(await result)
-            else:
-                return self.wrap_result(result)
-
-        raise RuntimeError(f"autocomplete callback missing for {name}!")
+        raise RuntimeError(f"autocomplete handler missing for {name}!")
 
 
 class HTTPDiscordMCPServer(BaseDiscordMCPServer[Request]):
