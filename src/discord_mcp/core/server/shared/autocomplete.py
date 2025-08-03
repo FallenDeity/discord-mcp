@@ -125,6 +125,7 @@ class AutocompleteHandler:
 
     def autocomplete(self, argument_name: str) -> t.Callable[[AutocompleteCallback], AutocompleteCallback]:
         """Provides completions for prompts and resource templates"""
+        # NOTE: To prevent circular imports, we import the ResourceManifest here
         from .manifests import ResourceManifest
 
         def decorator(fn: AutocompleteCallback) -> AutocompleteCallback:

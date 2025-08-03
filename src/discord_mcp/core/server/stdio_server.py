@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 
 class STDIODiscordMCPServer(BaseDiscordMCPServer[None]):
-    def __init__(self, *args: t.Any, name: str, bot: DiscordMCPBot, **kwargs: t.Any) -> None:
+    def __init__(self, name: str, bot: DiscordMCPBot, *args: t.Any, **kwargs: t.Any) -> None:
         super().__init__(*args, name=name, bot=bot, **kwargs, lifespan=stdio_lifespan)
 
     @classmethod

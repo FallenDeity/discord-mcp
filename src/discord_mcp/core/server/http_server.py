@@ -31,7 +31,7 @@ class DiscordMCPStarletteApp(Starlette):
         bot: DiscordMCPBot,
         mcp_server: HTTPDiscordMCPServer,
         session_manager: StreamableHTTPSessionManager | None = None,
-        *args: t.Any, 
+        *args: t.Any,
         **kwargs: t.Any,
     ) -> None:
         self.bot = bot

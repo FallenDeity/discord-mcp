@@ -7,9 +7,7 @@ from mcp.types import ToolAnnotations
 
 from discord_mcp.core.server.shared.manifests import BaseManifest, PromptManifest, ResourceManifest, ToolManifest
 
-__all__: tuple[str, ...] = (
-    "DiscordMCPPluginManager",
-)
+__all__: tuple[str, ...] = ("DiscordMCPPluginManager",)
 
 
 ManifestT = t.TypeVar("ManifestT", bound=BaseManifest)

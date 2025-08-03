@@ -1,8 +1,3 @@
-from .manager import DiscordMCPPluginManager, PromptManifest, ResourceManifest, ToolManifest
+from .manager import DiscordMCPPluginManager
 
-__all__: tuple[str, ...] = (
-    "DiscordMCPPluginManager",
-    "ToolManifest",
-    "ResourceManifest",
-    "PromptManifest",
-)
+__all__: tuple[str, ...] = ("DiscordMCPPluginManager",)
