@@ -28,10 +28,10 @@ logger = logging.getLogger(__name__)
 class DiscordMCPStarletteApp(Starlette):
     def __init__(
         self,
-        *args: t.Any,
         bot: DiscordMCPBot,
         mcp_server: HTTPDiscordMCPServer,
         session_manager: StreamableHTTPSessionManager | None = None,
+        *args: t.Any, 
         **kwargs: t.Any,
     ) -> None:
         self.bot = bot
