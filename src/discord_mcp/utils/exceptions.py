@@ -20,6 +20,10 @@ __all__: tuple[str, ...] = (
     "ResourceReadError",
     "PromptNotFoundError",
     "PromptRenderError",
+    "DisabledError",
+    "RateLimitExceededError",
+    "PermissionDeniedError",
+    "CheckFailureError",
 )
 
 

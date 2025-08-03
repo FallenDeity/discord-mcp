@@ -11,7 +11,7 @@ __all__: tuple[str, ...] = ("DiscordUser",)
 class DiscordUser(pydantic.BaseModel):
     id: int = pydantic.Field(description="The unique ID of the user.")
     discriminator: str = pydantic.Field(
-        description="The user's discriminator, a 4-digit number used to differentiate users with the same username. (deprecated in favor of username)"
+        description="(Deprecated) The user's discriminator, a 4-digit number used to differentiate users with the same username. Use 'username' instead. This field is deprecated and will be removed in a future version; removal date is currently unknown."
     )
     accent_color: tuple[int, int, int] = pydantic.Field(
         description="The user's accent color, represented as an RGB tuple."

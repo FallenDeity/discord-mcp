@@ -771,7 +771,7 @@ class BaseDiscordMCPServer(Server[DiscordMCPLifespanResult, RequestT]):
                         annotations=manifest.annotations,
                         structured_output=manifest.structured_output,
                     )
-            if isinstance(manifest, ResourceManifest):
+            elif isinstance(manifest, ResourceManifest):
                 # we use the decorator here to use the
                 # validations that we have already defined
                 if manifest.enabled:
@@ -783,7 +783,7 @@ class BaseDiscordMCPServer(Server[DiscordMCPLifespanResult, RequestT]):
                         mime_type=manifest.mime_type,
                     )(manifest.fn)
                     self._add_autocomplete_callback(manifest)
-            if isinstance(manifest, PromptManifest):
+            elif isinstance(manifest, PromptManifest):
                 if manifest.enabled:
                     self.prompt(
                         name=manifest.name,
@@ -791,6 +791,8 @@ class BaseDiscordMCPServer(Server[DiscordMCPLifespanResult, RequestT]):
                         description=manifest.description,
                     )(manifest.fn)
                     self._add_autocomplete_callback(manifest)
+            else:
+                logger.warning(f"Unknown manifest type: {type(manifest).__name__}")
 
             logger.info(f"Manifest {manifest.name} loaded")
 
