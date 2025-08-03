@@ -9,9 +9,6 @@ from discord_mcp.core.server.shared.manifests import BaseManifest, PromptManifes
 
 __all__: tuple[str, ...] = (
     "DiscordMCPPluginManager",
-    "ToolManifest",
-    "ResourceManifest",
-    "PromptManifest",
 )
 
 
