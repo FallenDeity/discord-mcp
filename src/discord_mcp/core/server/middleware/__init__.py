@@ -1,4 +1,4 @@
-from .logging import RequestLoggingMiddleware
+from .logging import LoggingMiddleware
 from .middleware import CallNext, Middleware, MiddlewareContext
 
-__all__: tuple[str, ...] = ("CallNext", "Middleware", "MiddlewareContext", "RequestLoggingMiddleware")
+__all__: tuple[str, ...] = ("CallNext", "Middleware", "MiddlewareContext", "LoggingMiddleware")

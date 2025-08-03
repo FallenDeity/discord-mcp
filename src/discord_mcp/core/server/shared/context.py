@@ -8,15 +8,18 @@ import typing as t
 
 import attrs
 from mcp.server.fastmcp.server import Context, FastMCP
+from mcp.server.lowlevel.helper_types import ReadResourceContents
 from mcp.server.lowlevel.server import request_ctx
 from mcp.server.session import ServerSession
 from mcp.shared.context import RequestContext
-from starlette.requests import Request
+from pydantic import AnyUrl
 from typing_extensions import TypeVar
 
 if t.TYPE_CHECKING:
-    from discord_mcp.core.bot import Bot
-    from discord_mcp.core.server.mcp_server import BaseDiscordMCPServer, DiscordMCPStarletteApp, STDIODiscordMCPServer
+    from discord_mcp.core.discord_ext.bot import DiscordMCPBot
+    from discord_mcp.core.server.base import BaseDiscordMCPServer
+    from discord_mcp.core.server.http_server import DiscordMCPStarletteApp
+    from discord_mcp.core.server.stdio_server import STDIODiscordMCPServer
 
     ServerT = TypeVar("ServerT", bound=BaseDiscordMCPServer[t.Any], default=BaseDiscordMCPServer[t.Any])
 else:
@@ -38,7 +41,7 @@ logger = logging.getLogger(__name__)
 
 @attrs.define
 class DiscordMCPLifespanResult(t.Generic[ServerT], collections.UserDict[str, t.Any]):
-    bot: Bot
+    bot: DiscordMCPBot
     mcp_server: ServerT
 
     def __attrs_post_init__(self) -> None:
@@ -59,7 +62,7 @@ class DiscordMCPContext(Context[ServerSession, DiscordMCPLifespanResult[ServerT]
         super().__init__(request_context=request_context, fastmcp=fastmcp, **kwargs)
 
     @property
-    def bot(self) -> Bot:
+    def bot(self) -> DiscordMCPBot:
         """Returns :class:`Bot`: a shortcut property, this is equivalent to `DiscordMCPContext.request_context.lifespan_context.bot`."""
         return self.request_context.lifespan_context.bot
 
@@ -68,10 +71,13 @@ class DiscordMCPContext(Context[ServerSession, DiscordMCPLifespanResult[ServerT]
         """Returns :class:`BaseDiscordMCPServer`: a shortcut property, this is equivalent to `DiscordMCPContext.request_context.lifespan_context.mcp_server`."""
         return self.request_context.lifespan_context.mcp_server
 
+    async def read_resource(self, uri: str | AnyUrl) -> t.Iterable[ReadResourceContents]:
+        return await self.mcp_server._read_resource(uri)
+
 
 @contextlib.asynccontextmanager
 async def _manage_bot_lifecycle(
-    bot: Bot, mcp_server: BaseDiscordMCPServer[t.Any]
+    bot: DiscordMCPBot, mcp_server: BaseDiscordMCPServer[t.Any]
 ) -> t.AsyncIterator[DiscordMCPLifespanResult]:
     """Common bot lifecycle management for both server types."""
     await bot.login(str(bot.environment.DISCORD_TOKEN))
@@ -106,7 +112,6 @@ async def starlette_lifespan(app: DiscordMCPStarletteApp) -> t.AsyncIterator[Dis
 
     logger.info("Starting application with StreamableHTTP session manager...")
 
-    await app.mcp_server.setup()
     async with app.session_manager.run():
         async with _manage_bot_lifecycle(app.bot, mcp_server=app.mcp_server) as result:
             yield result
@@ -114,7 +119,6 @@ async def starlette_lifespan(app: DiscordMCPStarletteApp) -> t.AsyncIterator[Dis
 
 @contextlib.asynccontextmanager
 async def stdio_lifespan(app: STDIODiscordMCPServer) -> t.AsyncIterator[DiscordMCPLifespanResult]:
-    await app.setup()
     async with _manage_bot_lifecycle(app.bot, mcp_server=app) as result:
         yield result
         logger.info("Application shutting down...")
@@ -125,7 +129,4 @@ def get_context() -> DiscordMCPContext:
         request_context = request_ctx.get()
     except LookupError:
         request_context = None
-    ctx = DiscordMCPContext(request_context=request_context, fastmcp=None)
-    if ctx.request_context and ctx.request_context.request and isinstance(ctx.request_context.request, Request):
-        ctx.request_context.lifespan_context = t.cast(DiscordMCPLifespanResult, ctx.request_context.request.state)
-    return ctx
+    return DiscordMCPContext(request_context=request_context, fastmcp=None)

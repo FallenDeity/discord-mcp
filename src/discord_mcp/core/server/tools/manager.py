@@ -6,7 +6,7 @@ import typing as t
 from mcp.server.fastmcp.tools import Tool, ToolManager
 from mcp.types import ToolAnnotations
 
-from discord_mcp.core.server.common.context import DiscordMCPContext
+from discord_mcp.core.server.shared.context import DiscordMCPContext
 from discord_mcp.utils.checks import find_kwarg_by_type
 from discord_mcp.utils.converters import convert_name_to_title, transform_function_signature
 

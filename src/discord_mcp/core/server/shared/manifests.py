@@ -4,7 +4,7 @@ import typing as t
 
 from mcp.types import ToolAnnotations
 
-from discord_mcp.core.server.common.autocomplete import AutoCompletable, AutocompleteHandler
+from discord_mcp.core.server.shared.autocomplete import AutoCompletable, AutocompleteHandler
 
 __all__: tuple[str, ...] = (
     "BaseManifest",

@@ -13,10 +13,13 @@ if t.TYPE_CHECKING:
     from discord_mcp.utils.env import Environment
 
 
+__all__: tuple[str, ...] = ("DiscordMCPBot",)
+
+
 logger = logging.getLogger(__name__)
 
 
-class Bot(commands.Bot):
+class DiscordMCPBot(commands.Bot):
     _start_time: datetime.datetime
 
     def __init__(self, environment: Environment = ENV) -> None:

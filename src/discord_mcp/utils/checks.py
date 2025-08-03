@@ -4,7 +4,7 @@ from types import UnionType
 
 from pydantic import validate_call
 
-from discord_mcp.core.server.common.context import DiscordMCPContext
+from discord_mcp.core.server.shared.context import DiscordMCPContext
 
 __all__: tuple[str, ...] = (
     "issubclass_safe",
