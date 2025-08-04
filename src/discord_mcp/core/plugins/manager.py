@@ -91,6 +91,9 @@ class DiscordMCPPluginManager:
         Context type annotation. The context provides access to MCP capabilities like
         logging, progress reporting, and resource access.
 
+        If no args are passed they are determined by inspecting the signature of the function
+        and the function docstrings.
+
         Args:
             name: Optional name for the tool (defaults to function name)
             title: Optional human-readable title for the tool
@@ -138,12 +141,19 @@ class DiscordMCPPluginManager:
 
         The function will be called when the resource is read to generate its content.
         The function can return:
-        - str for text content
-        - bytes for binary content
-        - other types will be converted to JSON
+            - str for text content
+            - bytes for binary content
+            - other types will be converted to JSON
 
         If the URI contains parameters (e.g. "resource://{param}") or the function
         has parameters, it will be registered as a template resource.
+
+        Resources can optionally request a Context object by adding a parameter with the
+        Context type annotation. The context provides access to MCP capabilities like
+        logging, progress reporting, and resource access.
+
+        If no args are passed they are determined by inspecting the signature of the function
+        and the function docstrings.
 
         Args:
             uri: URI for the resource (e.g. "resource://my-resource" or "resource://{param}")
@@ -202,6 +212,13 @@ class DiscordMCPPluginManager:
         description: str | None = None,
     ) -> PromptManifest | t.Callable[[t.Callable[..., t.Any]], PromptManifest]:
         """Decorator to register a prompt.
+
+        Prompts can optionally request a Context object by adding a parameter with the
+        Context type annotation. The context provides access to MCP capabilities like
+        logging, progress reporting, and resource access.
+
+        If no args are passed they are determined by inspecting the signature of the function
+        and the function docstrings.
 
         Args:
             name: Optional name for the prompt (defaults to function name)
