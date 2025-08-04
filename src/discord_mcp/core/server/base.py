@@ -755,9 +755,9 @@ class BaseDiscordMCPServer(Server[DiscordMCPLifespanResult, RequestT]):
                 logger.info("Warning: %s: %s", warning.category.__name__, warning.message)
 
     def _add_autocomplete_callback(self, manifest: ResourceManifest | PromptManifest) -> None:
-        if manifest.autocomplete_handler._autocomplete_fns:
+        if manifest._autocomplete_handler._autocomplete_fns:  # type: ignore
             name = manifest.name if isinstance(manifest, PromptManifest) else manifest.uri
-            self._autocomplete_callbacks[name] = manifest.autocomplete_handler
+            self._autocomplete_callbacks[name] = manifest._autocomplete_handler  # type: ignore
 
     def _load_manifests(self, manifests: list[BaseManifest]) -> None:
         for manifest in manifests:
