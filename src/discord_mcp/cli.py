@@ -7,9 +7,8 @@ import sys
 
 import click
 
-from discord_mcp.core.bot import Bot
-from discord_mcp.core.server.http_server import run_server as run_http_server
-from discord_mcp.core.server.stdio_server import run_server as run_stdio_server
+from discord_mcp.core.server.http_server import HTTPDiscordMCPServer
+from discord_mcp.core.server.stdio_server import STDIODiscordMCPServer
 from discord_mcp.utils.enums import ServerType
 from discord_mcp.utils.exceptions import handle_exception
 from discord_mcp.utils.logger import setup_logging
@@ -73,16 +72,13 @@ def cli(
         logger.debug("Debug logging is enabled" if debug else "Debug logging is disabled")
         logger.info(f"Server type: {server_type}")
 
-        # Create the bot instance
-        bot = Bot()
-
         # Run the appropriate server based on server_type
         if server_type == ServerType.HTTP:
             logger.info("Starting HTTP server")
-            run_http_server(bot)
+            HTTPDiscordMCPServer.start()
         else:
             logger.info("Starting stdio server")
-            asyncio.run(run_stdio_server(bot))
+            asyncio.run(STDIODiscordMCPServer.start())
 
 
 def show_version() -> None:

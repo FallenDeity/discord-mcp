@@ -10,9 +10,10 @@ from mcp.server.fastmcp.resources import FunctionResource, ResourceManager, Reso
 from mcp.server.fastmcp.resources.base import Resource
 from pydantic import AnyUrl
 
-from discord_mcp.core.server.common.context import DiscordMCPContext, get_context
+from discord_mcp.core.server.shared.context import DiscordMCPContext, get_context
 from discord_mcp.utils.checks import context_safe_validate_call, find_kwarg_by_type
 from discord_mcp.utils.converters import get_cached_typeadapter, process_callable_result, prune_param
+from discord_mcp.utils.exceptions import ResourceReadError
 
 __all__: tuple[str, ...] = (
     "DiscordMCPResourceManager",
@@ -41,7 +42,7 @@ class DiscordMCPFunctionResource(FunctionResource):
             else:
                 return pydantic_core.to_json(result, fallback=str, indent=2).decode()
         except Exception as e:
-            raise ValueError(f"Error reading resource {self.uri}: {e}")
+            raise ResourceReadError(f"Error reading resource {self.uri}: {e}")
 
     @classmethod
     def from_function(

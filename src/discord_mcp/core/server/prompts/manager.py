@@ -8,7 +8,7 @@ from mcp.server.fastmcp.prompts import Prompt, PromptManager
 from mcp.server.fastmcp.prompts.base import Message, PromptArgument, PromptResult, UserMessage, message_validator
 from mcp.types import TextContent
 
-from discord_mcp.core.server.common.context import DiscordMCPContext, get_context
+from discord_mcp.core.server.shared.context import DiscordMCPContext, get_context
 from discord_mcp.utils.checks import context_safe_validate_call, find_kwarg_by_type
 from discord_mcp.utils.converters import (
     convert_name_to_title,
@@ -18,7 +18,7 @@ from discord_mcp.utils.converters import (
     prune_param,
     transform_function_signature,
 )
-from discord_mcp.utils.exceptions import PromptError
+from discord_mcp.utils.exceptions import PromptRenderError
 
 __all__: tuple[str, ...] = (
     "DiscordMCPPromptManager",
@@ -120,11 +120,11 @@ class DiscordMCPPrompt(Prompt):
                         content = pydantic_core.to_json(msg, fallback=str, indent=2).decode()
                         messages.append(Message(role="user", content=content))
                 except Exception:
-                    raise PromptError(f"Could not convert prompt result to message: {msg}")
+                    raise PromptRenderError(f"Could not convert prompt result to message: {msg}")
 
             return messages
         except Exception as e:
-            raise PromptError(f"Error rendering prompt {self.name}: {e}")
+            raise PromptRenderError(f"Error rendering prompt {self.name}: {e}")
 
 
 class DiscordMCPPromptManager(PromptManager): ...

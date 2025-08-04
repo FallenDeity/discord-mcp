@@ -6,9 +6,8 @@ import typing as t
 import docstring_parser
 import pydantic
 import pydantic_core
-from mcp.server.fastmcp import Context
 
-from discord_mcp.core.server.common.context import DiscordMCPContext
+from discord_mcp.core.server.shared.context import DiscordMCPContext
 from discord_mcp.utils.checks import find_kwarg_by_type
 from discord_mcp.utils.enums import ResourceReturnType
 
@@ -68,6 +67,11 @@ def transform_function_signature(fn: t.Callable[..., t.Any]) -> t.Callable[..., 
     doc = inspect.getdoc(fn) or ""
     parsed_doc = docstring_parser.parse(doc)
 
+    try:
+        evaluated_hints = t.get_type_hints(fn, globalns=fn.__globals__, include_extras=True)
+    except Exception:
+        evaluated_hints = {}
+
     param_desc_map = {p.arg_name: (p.description, p.type_name) for p in parsed_doc.params if p.description}
 
     # if any param is untyped or *args/**kwargs raise an error
@@ -80,9 +84,7 @@ def transform_function_signature(fn: t.Callable[..., t.Any]) -> t.Callable[..., 
 
     updated_params: list[inspect.Parameter] = []
     for name, param in sig.parameters.items():
-        ann, default = param.annotation, param.default
-        if issubclass(param.annotation, Context):
-            continue
+        ann, default = evaluated_hints.get(name, param.annotation), param.default
         if name in param_desc_map:
             description, type_name = param_desc_map[name]
             ann = type_name if ann is inspect._empty and type_name else ann

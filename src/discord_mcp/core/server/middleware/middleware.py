@@ -39,7 +39,7 @@ from mcp.types import (
     UnsubscribeRequest,
 )
 
-from discord_mcp.core.server.common.context import DiscordMCPContext, get_context
+from discord_mcp.core.server.shared.context import DiscordMCPContext, get_context
 from discord_mcp.utils.enums import MiddlewareEventTypes, MiddlewareNotificationMethods, MiddlewareRequestMethods
 
 MessageT = t.TypeVar("MessageT", bound=Request[t.Any, t.Any] | Notification[t.Any, t.Any])

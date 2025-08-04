@@ -4,16 +4,27 @@ import functools
 import importlib
 import inspect
 import logging
+import pathlib
 import re
 import typing as t
+import warnings
+from contextlib import AsyncExitStack
 
+import anyio
+import mcp.types as types
 import pydantic_core
-from mcp.server.fastmcp.exceptions import ResourceError
+from anyio.streams.memory import MemoryObjectReceiveStream, MemoryObjectSendStream
 from mcp.server.fastmcp.resources import Resource
-from mcp.server.fastmcp.server import Settings, StreamableHTTPASGIApp
+from mcp.server.fastmcp.server import Settings
 from mcp.server.lowlevel import Server
 from mcp.server.lowlevel.helper_types import ReadResourceContents
-from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
+from mcp.server.lowlevel.server import request_ctx
+from mcp.server.models import InitializationOptions
+from mcp.server.session import ServerSession
+from mcp.shared.context import RequestContext
+from mcp.shared.exceptions import McpError
+from mcp.shared.message import ClientMessageMetadata, ServerMessageMetadata, SessionMessage
+from mcp.shared.session import RequestResponder
 from mcp.types import (
     AnyFunction,
     Completion,
@@ -31,61 +42,56 @@ from mcp.types import Resource as MCPResource
 from mcp.types import ResourceTemplate as MCPResourceTemplate
 from mcp.types import (
     ResourceTemplateReference,
-    ServerResult,
 )
 from mcp.types import Tool as MCPTool
 from mcp.types import (
     ToolAnnotations,
 )
 from pydantic.networks import AnyUrl
-from starlette.applications import Starlette
 from starlette.requests import Request
-from starlette.routing import Mount
 
-from discord_mcp.core.bot import Bot
+from discord_mcp.core.discord_ext.bot import DiscordMCPBot
 from discord_mcp.core.plugins.manager import DiscordMCPPluginManager
-from discord_mcp.core.server.common.autocomplete import AutocompleteHandler
-from discord_mcp.core.server.common.context import (
+from discord_mcp.core.server.middleware import (
+    CallNext,
+    LoggingMiddleware,
+    Middleware,
+    MiddlewareContext,
+)
+from discord_mcp.core.server.prompts.manager import DiscordMCPPrompt, DiscordMCPPromptManager
+from discord_mcp.core.server.resources.manager import (
+    DiscordMCPFunctionResource,
+    DiscordMCPResourceManager,
+)
+from discord_mcp.core.server.shared.autocomplete import AutocompleteHandler
+from discord_mcp.core.server.shared.context import (
     DiscordMCPContext,
     DiscordMCPLifespanResult,
     get_context,
-    starlette_lifespan,
-    stdio_lifespan,
 )
-from discord_mcp.core.server.common.manifests import (
+from discord_mcp.core.server.shared.manifests import (
     BaseManifest,
     PromptManifest,
     ResourceManifest,
     ToolManifest,
 )
-from discord_mcp.core.server.common.prompts.manager import DiscordMCPPrompt, DiscordMCPPromptManager
-from discord_mcp.core.server.common.resources.manager import (
-    DiscordMCPFunctionResource,
-    DiscordMCPResourceManager,
-)
-from discord_mcp.core.server.common.tools.manager import DiscordMCPToolManager
-from discord_mcp.core.server.middleware import (
-    CallNext,
-    Middleware,
-    MiddlewareContext,
-    RequestLoggingMiddleware,
-)
-from discord_mcp.persistence.adapters.sqlite_adapter import SQLiteAdapeter
-from discord_mcp.persistence.event_store import PersistentEventStore
+from discord_mcp.core.server.shared.session import DiscordMCPServerSession
+from discord_mcp.core.server.tools.manager import DiscordMCPToolManager
 from discord_mcp.utils.checks import find_kwarg_by_type
 from discord_mcp.utils.converters import convert_name_to_title, extract_mime_type_from_fn_return
+from discord_mcp.utils.enums import ErrorCodes
+from discord_mcp.utils.exceptions import (
+    PromptNotFoundError,
+    PromptRenderError,
+    ResourceNotFoundError,
+    ResourceReadError,
+)
 from discord_mcp.utils.plugins import search_directory
 
-if t.TYPE_CHECKING:
-    from discord_mcp.core.bot import Bot
+__all__: tuple[str, ...] = ("BaseDiscordMCPServer",)
 
 
-__all__: tuple[str, ...] = (
-    "DiscordMCPStarletteApp",
-    "BaseDiscordMCPServer",
-    "HTTPDiscordMCPServer",
-    "STDIODiscordMCPServer",
-)
+PLUGINS_PATH = pathlib.Path(__file__).parent.parent / "discord_ext"
 
 
 RequestT = t.TypeVar("RequestT", bound=t.Any)
@@ -94,27 +100,12 @@ RequestT = t.TypeVar("RequestT", bound=t.Any)
 logger = logging.getLogger(__name__)
 
 
-class DiscordMCPStarletteApp(Starlette):
-    def __init__(
-        self,
-        *args: t.Any,
-        bot: Bot,
-        mcp_server: HTTPDiscordMCPServer,
-        session_manager: StreamableHTTPSessionManager | None = None,
-        **kwargs: t.Any,
-    ) -> None:
-        self.bot = bot
-        self.mcp_server = mcp_server
-        self.session_manager = session_manager
-        super().__init__(*args, **kwargs, lifespan=starlette_lifespan)
-
-
 class BaseDiscordMCPServer(Server[DiscordMCPLifespanResult, RequestT]):
     def __init__(
         self,
         *args: t.Any,
         name: str,
-        bot: Bot,
+        bot: DiscordMCPBot,
         # TODO: Move this or aquire the settings from env or click command options, and utilize them internally
         settings: Settings[DiscordMCPLifespanResult] = Settings(
             lifespan=None,
@@ -139,7 +130,7 @@ class BaseDiscordMCPServer(Server[DiscordMCPLifespanResult, RequestT]):
     ) -> None:
         self.bot = bot
         self.settings = settings
-        self.middlewares: list[Middleware] = [RequestLoggingMiddleware()]
+        self.middlewares: list[Middleware] = [LoggingMiddleware()]
         self._tool_manager = DiscordMCPToolManager(warn_on_duplicate_tools=self.settings.warn_on_duplicate_tools)
         self._resource_manager = DiscordMCPResourceManager(
             warn_on_duplicate_resources=self.settings.warn_on_duplicate_resources
@@ -147,24 +138,10 @@ class BaseDiscordMCPServer(Server[DiscordMCPLifespanResult, RequestT]):
         self._prompt_manager = DiscordMCPPromptManager(
             warn_on_duplicate_prompts=self.settings.warn_on_duplicate_prompts
         )
-        self._original_handlers: dict[type, t.Callable[..., t.Awaitable[ServerResult]]] = {}
+        self._autocomplete_callbacks: dict[str, AutocompleteHandler] = dict()
         super().__init__(*args, name=name, **kwargs)
-        self._autocompleters: dict[str, AutocompleteHandler] = dict()
-
-    def _store_original_handlers(self) -> None:
-        self._original_handlers = {k: v for k, v in self.request_handlers.items()}
-
-    def _restore_original_handlers(self) -> None:
-        self.request_handlers.clear()
-        self.request_handlers.update(self._original_handlers)
-
-    async def setup(self) -> None:
-        # Setup the internal handlers
         self._setup_handlers()
-        # Store the original handlers
-        self._store_original_handlers()
-        # Apply middlewares to the handlers
-        self._apply_middlewares()
+        self._load_plugins(path=PLUGINS_PATH.as_posix())
 
     def _setup_handlers(self) -> None:
         """Set up core MCP protocol handlers."""
@@ -186,7 +163,6 @@ class BaseDiscordMCPServer(Server[DiscordMCPLifespanResult, RequestT]):
             return
         self.middlewares.append(middleware)
         logger.info(f"Middleware {middleware} added successfully.")
-        self._apply_middlewares()
 
     def remove_middleware(self, middleware: Middleware | type[Middleware]) -> None:
         """Remove a middleware from the server."""
@@ -199,28 +175,6 @@ class BaseDiscordMCPServer(Server[DiscordMCPLifespanResult, RequestT]):
             logger.warning(f"Middleware {middleware} not found, skipping removal.")
             return
         logger.info(f"Middleware {middleware} removed successfully.")
-        self._apply_middlewares()
-
-    def _apply_middlewares(self) -> None:
-        if not self._original_handlers:
-            logging.error("Original handlers not backed up, cannot apply middlewares")
-            return
-
-        self._restore_original_handlers()
-
-        def make_wrapper(handler: CallNext[t.Any, t.Any]) -> t.Callable[[MiddlewareContext[t.Any]], t.Awaitable[t.Any]]:
-            async def wrapper(ctx: MiddlewareContext[t.Any]) -> t.Any:
-                return await handler(ctx.message)
-
-            return wrapper
-
-        for request_type, handler in self.request_handlers.items():
-            chain = make_wrapper(handler)
-            for mw in reversed(self.middlewares):
-                chain = functools.partial(mw, call_next=chain)
-            self.request_handlers[request_type] = chain
-
-        logger.info(f"Applied {len(self.middlewares)} middlewares to handlers.")
 
     async def _list_tools(self) -> list[MCPTool]:
         """List all available tools."""
@@ -269,7 +223,6 @@ class BaseDiscordMCPServer(Server[DiscordMCPLifespanResult, RequestT]):
             return t.cast(dict[str, t.Any], result[1])
         return t.cast(t.Sequence[ContentBlock], result)
 
-    # TODO: Offload these decorator functions into a central registry, and just load them here using a plugin system.
     def add_tool(
         self,
         fn: AnyFunction,
@@ -498,14 +451,14 @@ class BaseDiscordMCPServer(Server[DiscordMCPLifespanResult, RequestT]):
 
         resource = await self._resource_manager.get_resource(uri)
         if not resource:
-            raise ResourceError(f"Unknown resource: {uri}")
+            raise ResourceNotFoundError(f"Unknown resource: {uri}")
 
         try:
             content = await resource.read()
             return [ReadResourceContents(content=content, mime_type=resource.mime_type)]
         except Exception as e:
             logger.exception(f"Error reading resource {uri}")
-            raise ResourceError(str(e))
+            raise ResourceReadError(str(e))
 
     def add_prompt(self, prompt: DiscordMCPPrompt) -> None:
         """Add a prompt to the server.
@@ -604,7 +557,7 @@ class BaseDiscordMCPServer(Server[DiscordMCPLifespanResult, RequestT]):
         try:
             prompt = self._prompt_manager.get_prompt(name)
             if not prompt:
-                raise ValueError(f"Unknown prompt: {name}")
+                raise PromptNotFoundError(f"Unknown prompt: {name}")
 
             messages = await prompt.render(arguments)
 
@@ -614,12 +567,197 @@ class BaseDiscordMCPServer(Server[DiscordMCPLifespanResult, RequestT]):
             )
         except Exception as e:
             logger.exception(f"Error getting prompt {name}")
-            raise ValueError(str(e))
+            raise PromptRenderError(str(e))
+
+    async def run(
+        self,
+        read_stream: MemoryObjectReceiveStream[SessionMessage | Exception],
+        write_stream: MemoryObjectSendStream[SessionMessage],
+        initialization_options: InitializationOptions,
+        # When False, exceptions are returned as messages to the client.
+        # When True, exceptions are raised, which will cause the server to shut down
+        # but also make tracing exceptions much easier during testing and when using
+        # in-process servers.
+        raise_exceptions: bool = False,
+        # When True, the server is stateless and
+        # clients can perform initialization with any node. The client must still follow
+        # the initialization lifecycle, but can do so with any available node
+        # rather than requiring initialization for each connection.
+        stateless: bool = False,
+    ):
+        async with AsyncExitStack() as stack:
+            lifespan_context = await stack.enter_async_context(self.lifespan(self))
+            session = await stack.enter_async_context(
+                DiscordMCPServerSession(
+                    read_stream,
+                    write_stream,
+                    initialization_options,
+                    stateless=stateless,
+                )
+            )
+
+            async with anyio.create_task_group() as tg:
+                async for message in session.incoming_messages:
+                    logger.debug("Received message: %s", message)
+
+                    tg.start_soon(
+                        self._handle_message,
+                        message,
+                        session,
+                        lifespan_context,
+                        raise_exceptions,
+                    )
+
+    def _apply_middlewares(
+        self, handler: CallNext[t.Any, t.Any]
+    ) -> t.Callable[[MiddlewareContext[t.Any] | t.Any], t.Awaitable[t.Any]]:
+        def make_wrapper(
+            handler: CallNext[t.Any, t.Any],
+        ) -> t.Callable[[MiddlewareContext[t.Any] | t.Any], t.Awaitable[t.Any]]:
+            async def wrapper(ctx: MiddlewareContext[t.Any]) -> t.Any:
+                return await handler(ctx.message)
+
+            return wrapper
+
+        chain = make_wrapper(handler)
+        for mw in reversed(self.middlewares):
+            chain = functools.partial(mw, call_next=chain)
+
+        return chain
+
+    async def _handle_request(
+        self,
+        message: RequestResponder[types.ClientRequest, types.ServerResult],
+        req: t.Any,
+        session: ServerSession,
+        lifespan_context: DiscordMCPLifespanResult,
+        raise_exceptions: bool,
+    ):
+        if handler := self.request_handlers.get(type(req)):  # type: ignore
+            logger.debug("Dispatching request of type %s", type(req).__name__)
+
+            token = None
+            try:
+                # Extract request context from message metadata
+                request_data: Request | None = None
+                if message.message_metadata is not None and isinstance(message.message_metadata, ServerMessageMetadata):
+                    request_data = t.cast(Request | None, message.message_metadata.request_context)
+
+                chain = self._apply_middlewares(handler)
+
+                # Set our global state that can be retrieved via
+                # app.get_request_context()
+                token = request_ctx.set(
+                    RequestContext(
+                        message.request_id,
+                        message.request_meta,
+                        session,
+                        lifespan_context or (request_data.state if request_data else None),
+                        request=request_data,
+                    )
+                )
+                response = await chain(req)
+            except McpError as err:
+                response = err.error
+            except anyio.get_cancelled_exc_class():
+                logger.info(
+                    "Request %s cancelled - duplicate response suppressed",
+                    message.request_id,
+                )
+                return
+            except Exception as err:
+                if raise_exceptions:
+                    raise err
+                response = types.ErrorData(
+                    code=ErrorCodes.INTERNAL_ERROR,
+                    message=f"An uncaught exception occurred while handling request {message.request_id}: {str(err)}",
+                    data=None,
+                )
+            finally:
+                # Reset the global state after we are done
+                if token is not None:
+                    request_ctx.reset(token)
+
+            await message.respond(response)
+        else:
+            logger.warning("Method %s not found", type(req).__name__)
+            await message.respond(
+                types.ErrorData(
+                    code=ErrorCodes.METHOD_NOT_FOUND,
+                    message=f"Method {type(req).__name__} not found",
+                )
+            )
+
+        logger.debug("Response sent")
+
+    async def _handle_notification(  # type: ignore
+        self,
+        message: types.Notification[t.Any, t.Any],
+        req: ServerMessageMetadata | ClientMessageMetadata | None,
+        session: ServerSession,
+        lifespan_context: DiscordMCPLifespanResult,
+        raise_exceptions: bool = False,
+    ) -> None:
+        async def blank_handler(message: types.Notification[t.Any, t.Any]) -> None:
+            """A blank handler that does nothing."""
+            pass
+
+        handler = self.notification_handlers.get(type(message), blank_handler)
+        logger.debug("Dispatching notification of type %s", type(message).__name__)
+        token = None
+        try:
+            request_id = None
+            request_data: Request | None = None
+            if req is not None and isinstance(req, ServerMessageMetadata):
+                request_data = t.cast(Request | None, req.request_context)
+                request_id = req.related_request_id
+
+            token = request_ctx.set(
+                RequestContext(
+                    request_id or -1,  # Use -1 if no request_id is available
+                    None,
+                    session,
+                    lifespan_context or (request_data.state if request_data else None),
+                    request=request_data,
+                )
+            )
+            chain = self._apply_middlewares(handler)
+            await chain(message)
+        except Exception as err:
+            logger.exception(f"Error handling notification {type(message).__name__}: {err}")
+            if raise_exceptions:
+                raise err
+        finally:
+            # Reset the global state after we are done
+            if token is not None:
+                request_ctx.reset(token)
+
+    async def _handle_message(
+        self,
+        message: RequestResponder[types.ClientRequest, types.ServerResult] | types.ClientNotification | Exception,
+        session: ServerSession,
+        lifespan_context: DiscordMCPLifespanResult,
+        raise_exceptions: bool = False,
+    ):
+        logger.debug("Received message of type %s", type(message).__name__)
+        with warnings.catch_warnings(record=True) as w:
+            # TODO(Marcelo): We should be checking if message is Exception here.
+            match message:  # type: ignore[reportMatchNotExhaustive]
+                case RequestResponder(request=types.ClientRequest(root=req)) as responder:
+                    with responder:
+                        await self._handle_request(message, req, session, lifespan_context, raise_exceptions)
+                case types.ClientNotification(root=notify):
+                    await self._handle_notification(
+                        notify, message.__dict__.get("metadata", None), session, lifespan_context, raise_exceptions
+                    )
+
+            for warning in w:
+                logger.info("Warning: %s: %s", warning.category.__name__, warning.message)
 
     def _add_autocomplete_callback(self, manifest: ResourceManifest | PromptManifest) -> None:
         if manifest.autocomplete_handler._autocomplete_fns:
             name = manifest.name if isinstance(manifest, PromptManifest) else manifest.uri
-            self._autocompleters[name] = manifest.autocomplete_handler
+            self._autocomplete_callbacks[name] = manifest.autocomplete_handler
 
     def _load_manifests(self, manifests: list[BaseManifest]) -> None:
         for manifest in manifests:
@@ -654,25 +792,23 @@ class BaseDiscordMCPServer(Server[DiscordMCPLifespanResult, RequestT]):
                     )(manifest.fn)
                     self._add_autocomplete_callback(manifest)
             else:
-                # should never happen
-                raise NotImplementedError
+                logger.warning(f"Unknown manifest type: {type(manifest).__name__}")
 
             logger.info(f"Manifest {manifest.name} loaded")
 
-    def load_plugin(self, name: str, *, package: str | None = None) -> None:
+    def _load_plugin(self, name: str, *, package: str | None = None) -> None:
         mod = importlib.import_module(name, package)
 
         for member in inspect.getmembers(mod):
             if isinstance(member[1], DiscordMCPPluginManager):
                 manager = member[1]
                 self._load_manifests(manager._manifests)
+                logger.info(f"Plugin {name} loaded with {len(manager._manifests)} manifests")
                 break
 
-        logger.info(f"Plugin {name} loaded!")
-
-    def load_plugins(self, path: str) -> None:
+    def _load_plugins(self, path: str) -> None:
         for plugin in search_directory(path):
-            self.load_plugin(plugin)
+            self._load_plugin(plugin)
 
     async def _autocomplete_base_handler(
         self,
@@ -684,33 +820,6 @@ class BaseDiscordMCPServer(Server[DiscordMCPLifespanResult, RequestT]):
             f"Autocompleting for {reference.model_dump_json()} with argument {argument.model_dump_json()} and context {context.model_dump_json() if context else None}"
         )
         name = reference.name if isinstance(reference, PromptReference) else reference.uri
-        autocomplete_obj = self._autocompleters.get(name)
-        if autocomplete_obj:
+        if autocomplete_obj := self._autocomplete_callbacks.get(name):
             return await autocomplete_obj(reference, argument, context)
-
-        raise RuntimeError(f"autocomplete handler missing for {name}.")
-
-
-class HTTPDiscordMCPServer(BaseDiscordMCPServer[Request]):
-    @property
-    def streamable_http_app(self) -> Starlette:
-        # TODO: Make this configurable from cli
-        event_store = PersistentEventStore(adapter=SQLiteAdapeter())
-        session_manager = StreamableHTTPSessionManager(app=self, event_store=event_store)
-
-        # TODO: Add auth stuff here, and make mount path configurable from cli
-        starlette_app = DiscordMCPStarletteApp(
-            bot=self.bot,
-            session_manager=session_manager,
-            mcp_server=self,
-            debug=True,
-            routes=[Mount("/mcp", app=StreamableHTTPASGIApp(session_manager))],
-        )
-        return starlette_app
-
-
-class STDIODiscordMCPServer(BaseDiscordMCPServer[Request]):
-    def __init__(self, *args: t.Any, name: str, bot: Bot, **kwargs: t.Any) -> None:
-        super().__init__(
-            *args, name=name, bot=bot, **kwargs, lifespan=stdio_lifespan
-        )  # pyright: ignore[reportUnknownLambdaType]
+        return Completion(values=[])

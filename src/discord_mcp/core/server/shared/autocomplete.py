@@ -11,14 +11,14 @@ from mcp.types import (
     ResourceTemplateReference,
 )
 
-from discord_mcp.core.server.common.context import DiscordMCPContext, get_context
-from discord_mcp.core.server.common.prompts.manager import DiscordMCPPrompt
-from discord_mcp.core.server.common.resources.manager import DiscordMCPResourceTemplate
+from discord_mcp.core.server.prompts.manager import DiscordMCPPrompt
+from discord_mcp.core.server.resources.manager import DiscordMCPResourceTemplate
+from discord_mcp.core.server.shared.context import DiscordMCPContext, get_context
 from discord_mcp.utils.checks import autocomplete_validate_argument_name, autocomplete_validate_resource_template
 from discord_mcp.utils.converters import convert_string_arguments
 
 if t.TYPE_CHECKING:
-    from discord_mcp.core.server.common.manifests import PromptManifest, ResourceManifest
+    from discord_mcp.core.server.shared.manifests import PromptManifest, ResourceManifest
 
 __all__: tuple[str, ...] = (
     "AutoCompletable",
@@ -100,7 +100,10 @@ class AutocompleteHandler:
         except KeyError as e:
             # normally should never happen if you don't play at removing
             # handler from the managers at runtime
-            raise RuntimeError("An autocomplete for an unregistered prompt or template has been called.") from e
+            ref_id = f"name='{reference.name}'" if isinstance(reference, PromptReference) else f"uri='{reference.uri}'"
+            raise RuntimeError(
+                f"An autocomplete for an unregistered prompt or template has been called (reference: {ref_id})."
+            ) from e
 
         promoted_argument_value = convert_string_arguments(promoted.fn, {argument.name: argument.value})[argument.name]
         if context and context.arguments:
@@ -108,10 +111,12 @@ class AutocompleteHandler:
         else:
             promoted_context_args = None
 
-        if self._autocomplete_fns:
+        if argument.name in self._autocomplete_fns:
             result = self._autocomplete_fns[argument.name](promoted, promoted_argument_value, promoted_context_args)
         else:
-            raise RuntimeError(f"autocomplete callback is `None` for {promoted.name}!")
+            raise RuntimeError(
+                f"No autocomplete callback registered for argument '{argument.name}' in {promoted.name}!"
+            )
 
         if asyncio.iscoroutine(result):
             return self.wrap_result(await result)
@@ -120,8 +125,8 @@ class AutocompleteHandler:
 
     def autocomplete(self, argument_name: str) -> t.Callable[[AutocompleteCallback], AutocompleteCallback]:
         """Provides completions for prompts and resource templates"""
-        # avoid circular import
-        from discord_mcp.core.server.common.manifests import ResourceManifest
+        # NOTE: To prevent circular imports, we import the ResourceManifest here
+        from .manifests import ResourceManifest
 
         def decorator(fn: AutocompleteCallback) -> AutocompleteCallback:
             if isinstance(self.manifest, ResourceManifest):

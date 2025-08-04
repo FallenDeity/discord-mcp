@@ -2,6 +2,31 @@ import enum
 
 from pydantic import BaseModel
 
+__all__: tuple[str, ...] = (
+    "ErrorCodes",
+    "MiddlewareEventTypes",
+    "MiddlewareRequestMethods",
+    "MiddlewareNotificationMethods",
+    "ServerType",
+    "ResourceReturnType",
+)
+
+
+class ErrorCodes(enum.IntEnum):
+    PARSE_ERROR = -32700
+    INVALID_REQUEST = -32600
+    METHOD_NOT_FOUND = -32601
+    INVALID_PARAMS = -32602
+    INTERNAL_ERROR = -32603
+    RESOURCE_NOT_FOUND = -32001
+    RESOURCE_READ_ERROR = -32002
+    PROMPT_NOT_FOUND = -32003
+    PROMPT_RENDER_ERROR = -32004
+    DISABLED = -32005
+    RATE_LIMIT_EXCEEDED = -32006
+    PERMISSION_DENIED = -32007
+    CHECK_FAILURE = -32008
+
 
 class MiddlewareEventTypes(enum.StrEnum):
     REQUEST = "request"
