@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import abc
 import asyncio
 import typing as t
 
+import typing_extensions
 from mcp.types import (
     Completion,
     CompletionArgument,
@@ -25,23 +27,39 @@ __all__: tuple[str, ...] = (
     "AutocompleteHandler",
 )
 
-AutocompleteCallback = t.Callable[
-    [DiscordMCPPrompt | DiscordMCPResourceTemplate, t.Any, dict[str, t.Any] | None],
-    t.Any,
-]
+T = typing_extensions.TypeVar(
+    "T", bound=DiscordMCPPrompt | DiscordMCPResourceTemplate, default=DiscordMCPPrompt | DiscordMCPResourceTemplate
+)
+RefT = typing_extensions.TypeVar(
+    "RefT", bound=PromptReference | ResourceTemplateReference, default=PromptReference | ResourceTemplateReference
+)
 
 
 # mixin to be used in conjunction to AutocompleteHandler
-class AutoCompletable:
-    autocomplete_handler: AutocompleteHandler
+class AutoCompletable(t.Generic[T, RefT], abc.ABC):
+    _autocomplete_handler: AutocompleteHandler[T, RefT]
 
-    def autocomplete(self, argument_name: str) -> t.Callable[[AutocompleteCallback], AutocompleteCallback]:
+    def autocomplete(self, argument_name: str) -> t.Callable[
+        [
+            t.Callable[
+                [DiscordMCPContext, T, t.Any, dict[str, t.Any] | None],
+                t.Any,
+            ]
+        ],
+        t.Callable[
+            [DiscordMCPContext, T, t.Any, dict[str, t.Any] | None],
+            t.Any,
+        ],
+    ]:
         """Provides completions for prompts and resource templates.
 
         The decorated function must take exactly 3 arguments:
+            - a ``context`` which has the type `DiscordMCPContext`
             - a ``reference`` which has the type `DiscordMCPPrompt` | `DiscordMCPResourceTemplate`
+                based on which type of manifest the autocomplete is being applied to. If it for a resource
+                it'll be a `DiscordMCPResourceTemplate`, otherwise `DiscordMCPPrompt`.
             - an ``argument`` which has the type of the autocompleted argument
-            - a ``context`` which has the type of `dict[str, Any]`
+            - an ``args_context`` which has the type of `dict[str, Any]`
 
         Note:
             The return type can be any, it is wrapped internally. If you want to override this behaviour
@@ -57,13 +75,15 @@ class AutoCompletable:
         Args:
             argument_name: The name of the argument to autocomplete.
         """
-        return self.autocomplete_handler.autocomplete(argument_name)
+        return self._autocomplete_handler.autocomplete(argument_name)
 
 
-class AutocompleteHandler:
+class AutocompleteHandler(t.Generic[T, RefT]):
     def __init__(self, manifest: PromptManifest | ResourceManifest) -> None:
         self.manifest = manifest
-        self._autocomplete_fns: dict[str, AutocompleteCallback] = dict()
+        self._autocomplete_fns: dict[str, t.Callable[[DiscordMCPContext, T, t.Any, dict[str, t.Any] | None], t.Any]] = (
+            dict()
+        )
 
     def wrap_result(self, result: t.Any) -> Completion:
         if isinstance(result, Completion):
@@ -77,19 +97,19 @@ class AutocompleteHandler:
 
     def promote_reference_to_type(
         self,
-        reference: PromptReference | ResourceTemplateReference,
+        reference: RefT,
         mcp_context: DiscordMCPContext,
-    ) -> DiscordMCPPrompt | DiscordMCPResourceTemplate:
+    ) -> T:
         if isinstance(reference, PromptReference):
-            return t.cast(DiscordMCPPrompt, mcp_context.mcp_server._prompt_manager._prompts[reference.name])
+            return t.cast(DiscordMCPPrompt, mcp_context.mcp_server._prompt_manager._prompts[reference.name])  # type: ignore
         else:
             return t.cast(
-                DiscordMCPResourceTemplate, mcp_context.mcp_server._resource_manager._templates[reference.uri]
+                DiscordMCPResourceTemplate, mcp_context.mcp_server._resource_manager._templates[reference.uri]  # type: ignore
             )
 
     async def __call__(
         self,
-        reference: PromptReference | ResourceTemplateReference,
+        reference: RefT,
         argument: CompletionArgument,
         context: CompletionContext | None,
     ) -> Completion:
@@ -112,7 +132,9 @@ class AutocompleteHandler:
             promoted_context_args = None
 
         if argument.name in self._autocomplete_fns:
-            result = self._autocomplete_fns[argument.name](promoted, promoted_argument_value, promoted_context_args)
+            result = self._autocomplete_fns[argument.name](
+                mcp_context, promoted, promoted_argument_value, promoted_context_args
+            )
         else:
             raise RuntimeError(
                 f"No autocomplete callback registered for argument '{argument.name}' in {promoted.name}!"
@@ -123,12 +145,25 @@ class AutocompleteHandler:
         else:
             return self.wrap_result(result)
 
-    def autocomplete(self, argument_name: str) -> t.Callable[[AutocompleteCallback], AutocompleteCallback]:
+    def autocomplete(self, argument_name: str) -> t.Callable[
+        [
+            t.Callable[
+                [DiscordMCPContext, T, t.Any, dict[str, t.Any] | None],
+                t.Any,
+            ]
+        ],
+        t.Callable[
+            [DiscordMCPContext, T, t.Any, dict[str, t.Any] | None],
+            t.Any,
+        ],
+    ]:
         """Provides completions for prompts and resource templates"""
         # NOTE: To prevent circular imports, we import the ResourceManifest here
         from .manifests import ResourceManifest
 
-        def decorator(fn: AutocompleteCallback) -> AutocompleteCallback:
+        def decorator(
+            fn: t.Callable[[DiscordMCPContext, T, t.Any, dict[str, t.Any] | None], t.Any],
+        ) -> t.Callable[[DiscordMCPContext, T, t.Any, dict[str, t.Any] | None], t.Any]:
             if isinstance(self.manifest, ResourceManifest):
                 autocomplete_validate_resource_template(self.manifest.fn, self.manifest.uri)
             autocomplete_validate_argument_name(self.manifest.fn, argument_name)
