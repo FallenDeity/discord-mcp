@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import typing as t
 
-from mcp.types import ToolAnnotations
+from mcp.types import PromptReference, ResourceTemplateReference, ToolAnnotations
 
+from discord_mcp.core.server.prompts import DiscordMCPPrompt
+from discord_mcp.core.server.resources import DiscordMCPResourceTemplate
 from discord_mcp.core.server.shared.autocomplete import AutoCompletable, AutocompleteHandler
 
 __all__: tuple[str, ...] = (
@@ -49,7 +51,7 @@ class ToolManifest(BaseManifest):
         self.structured_output = structured_output
 
 
-class ResourceManifest(BaseManifest, AutoCompletable):
+class ResourceManifest(BaseManifest, AutoCompletable[DiscordMCPResourceTemplate, ResourceTemplateReference]):
     def __init__(
         self,
         fn: t.Callable[..., t.Any],
@@ -63,10 +65,10 @@ class ResourceManifest(BaseManifest, AutoCompletable):
         super().__init__(fn, name, title, description, enabled)
         self.uri = uri
         self.mime_type = mime_type
-        self.autocomplete_handler = AutocompleteHandler(self)
+        self._autocomplete_handler = AutocompleteHandler(self)
 
 
-class PromptManifest(BaseManifest, AutoCompletable):
+class PromptManifest(BaseManifest, AutoCompletable[DiscordMCPPrompt, PromptReference]):
     def __init__(
         self,
         fn: t.Callable[..., t.Any],
@@ -77,4 +79,4 @@ class PromptManifest(BaseManifest, AutoCompletable):
     ) -> None:
         super().__init__(fn, name, title, description, enabled)
         self.name = name or fn.__name__
-        self.autocomplete_handler = AutocompleteHandler(self)
+        self._autocomplete_handler = AutocompleteHandler(self)

@@ -78,7 +78,7 @@ class DiscordMCPContext(Context[ServerSession, DiscordMCPLifespanResult[ServerT]
 @contextlib.asynccontextmanager
 async def _manage_bot_lifecycle(
     bot: DiscordMCPBot, mcp_server: BaseDiscordMCPServer[t.Any]
-) -> t.AsyncIterator[DiscordMCPLifespanResult]:
+) -> t.AsyncIterator[DiscordMCPLifespanResult[BaseDiscordMCPServer[t.Any]]]:
     """Common bot lifecycle management for both server types."""
     await bot.login(str(bot.environment.DISCORD_TOKEN))
     _bot_task = asyncio.create_task(bot.connect())
@@ -106,7 +106,9 @@ async def _manage_bot_lifecycle(
 
 
 @contextlib.asynccontextmanager
-async def starlette_lifespan(app: DiscordMCPStarletteApp) -> t.AsyncIterator[DiscordMCPLifespanResult]:
+async def starlette_lifespan(
+    app: DiscordMCPStarletteApp,
+) -> t.AsyncIterator[DiscordMCPLifespanResult[BaseDiscordMCPServer[t.Any]]]:
     if not app.session_manager:
         raise RuntimeError("Session manager is not initialized, cannot run lifespan context")
 
@@ -118,7 +120,9 @@ async def starlette_lifespan(app: DiscordMCPStarletteApp) -> t.AsyncIterator[Dis
 
 
 @contextlib.asynccontextmanager
-async def stdio_lifespan(app: STDIODiscordMCPServer) -> t.AsyncIterator[DiscordMCPLifespanResult]:
+async def stdio_lifespan(
+    app: STDIODiscordMCPServer,
+) -> t.AsyncIterator[DiscordMCPLifespanResult[BaseDiscordMCPServer[t.Any]]]:
     async with _manage_bot_lifecycle(app.bot, mcp_server=app) as result:
         yield result
         logger.info("Application shutting down...")
