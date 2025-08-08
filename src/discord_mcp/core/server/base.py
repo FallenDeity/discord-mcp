@@ -25,28 +25,15 @@ from mcp.shared.context import RequestContext
 from mcp.shared.exceptions import McpError
 from mcp.shared.message import ClientMessageMetadata, ServerMessageMetadata, SessionMessage
 from mcp.shared.session import RequestResponder
-from mcp.types import (
-    AnyFunction,
-    Completion,
-    CompletionArgument,
-    CompletionContext,
-    ContentBlock,
-    GetPromptResult,
-)
+from mcp.types import AnyFunction, Completion, CompletionArgument, CompletionContext, ContentBlock, GetPromptResult
 from mcp.types import Prompt as MCPPrompt
 from mcp.types import PromptArgument as MCPPromptArgument
-from mcp.types import (
-    PromptReference,
-)
+from mcp.types import PromptReference
 from mcp.types import Resource as MCPResource
 from mcp.types import ResourceTemplate as MCPResourceTemplate
-from mcp.types import (
-    ResourceTemplateReference,
-)
+from mcp.types import ResourceTemplateReference
 from mcp.types import Tool as MCPTool
-from mcp.types import (
-    ToolAnnotations,
-)
+from mcp.types import ToolAnnotations
 from pydantic.networks import AnyUrl
 from starlette.requests import Request
 
@@ -57,24 +44,14 @@ from discord_mcp.core.server.middleware import (
     LoggingMiddleware,
     Middleware,
     MiddlewareContext,
+    RateLimitMiddleware,
 )
 from discord_mcp.core.server.prompts.manager import DiscordMCPPrompt, DiscordMCPPromptManager
-from discord_mcp.core.server.resources.manager import (
-    DiscordMCPFunctionResource,
-    DiscordMCPResourceManager,
-)
+from discord_mcp.core.server.resources.manager import DiscordMCPFunctionResource, DiscordMCPResourceManager
 from discord_mcp.core.server.shared.autocomplete import AutocompleteHandler
-from discord_mcp.core.server.shared.context import (
-    DiscordMCPContext,
-    DiscordMCPLifespanResult,
-    get_context,
-)
-from discord_mcp.core.server.shared.manifests import (
-    BaseManifest,
-    PromptManifest,
-    ResourceManifest,
-    ToolManifest,
-)
+from discord_mcp.core.server.shared.context import DiscordMCPContext, DiscordMCPLifespanResult, get_context
+from discord_mcp.core.server.shared.manifests import BaseManifest, PromptManifest, ResourceManifest, ToolManifest
+from discord_mcp.core.server.shared.repository import ManifestRepository
 from discord_mcp.core.server.shared.session import DiscordMCPServerSession
 from discord_mcp.core.server.tools.manager import DiscordMCPToolManager
 from discord_mcp.utils.checks import find_kwarg_by_type
@@ -130,7 +107,7 @@ class BaseDiscordMCPServer(Server[DiscordMCPLifespanResult, RequestT]):
     ) -> None:
         self.bot = bot
         self.settings = settings
-        self.middlewares: list[Middleware] = [LoggingMiddleware()]
+        self.middlewares: list[Middleware] = [LoggingMiddleware(), RateLimitMiddleware()]
         self._tool_manager = DiscordMCPToolManager(warn_on_duplicate_tools=self.settings.warn_on_duplicate_tools)
         self._resource_manager = DiscordMCPResourceManager(
             warn_on_duplicate_resources=self.settings.warn_on_duplicate_resources
@@ -139,6 +116,7 @@ class BaseDiscordMCPServer(Server[DiscordMCPLifespanResult, RequestT]):
             warn_on_duplicate_prompts=self.settings.warn_on_duplicate_prompts
         )
         self._autocomplete_callbacks: dict[str, AutocompleteHandler] = dict()
+        self._manifest_repository = ManifestRepository()
         super().__init__(*args, name=name, **kwargs)
         self._setup_handlers()
         self._load_plugins(path=PLUGINS_PATH.as_posix())
@@ -760,6 +738,7 @@ class BaseDiscordMCPServer(Server[DiscordMCPLifespanResult, RequestT]):
             self._autocomplete_callbacks[name] = manifest._autocomplete_handler  # type: ignore
 
     def _load_manifests(self, manifests: list[BaseManifest]) -> None:
+        self._manifest_repository.add_manifests(manifests)
         for manifest in manifests:
             if isinstance(manifest, ToolManifest):
                 if manifest.enabled:
