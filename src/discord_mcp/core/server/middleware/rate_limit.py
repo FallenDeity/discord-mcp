@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import typing as t
 
+import attrs
 from mcp.types import (
     CallToolRequest,
     CallToolResult,
@@ -41,7 +42,8 @@ class RateLimitMiddleware(Middleware):
         if not rate_limit:
             bucket_stats = manifest.cooldown.get_bucket(ctx.context).stats
             raise RateLimitExceededError(
-                message=f"Rate limit exceeded for {ctx.method} on {key} | {str(bucket_stats)}", data=bucket_stats
+                message=f"Rate limit exceeded for {ctx.method} on {key} | {str(bucket_stats)}",
+                data=attrs.asdict(bucket_stats),
             )
         return await call_next(ctx)
 
