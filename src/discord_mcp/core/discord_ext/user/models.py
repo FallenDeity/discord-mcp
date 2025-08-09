@@ -9,7 +9,7 @@ __all__: tuple[str, ...] = ("DiscordUser",)
 
 
 class DiscordUser(pydantic.BaseModel):
-    id: int = pydantic.Field(description="The unique ID of the user.")
+    id: str = pydantic.Field(description="The unique ID of the user.")
     discriminator: str = pydantic.Field(
         description="(Deprecated) The user's discriminator, a 4-digit number used to differentiate users with the same username. Use 'username' instead. This field is deprecated and will be removed in a future version; removal date is currently unknown."
     )
@@ -37,7 +37,7 @@ class DiscordUser(pydantic.BaseModel):
     def from_discord_user(cls, user: discord.User | discord.ClientUser) -> DiscordUser:
         """Create a DiscordUser instance from a discord.User object."""
         return cls(
-            id=user.id,
+            id=str(user.id),
             username=user.name,
             discriminator=user.discriminator,
             avatar=user.display_avatar.url,

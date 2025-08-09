@@ -1,12 +1,6 @@
 import logging
 
-from mcp.server.streamable_http import (
-    EventCallback,
-    EventId,
-    EventMessage,
-    EventStore,
-    StreamId,
-)
+from mcp.server.streamable_http import EventCallback, EventId, EventMessage, EventStore, StreamId
 from mcp.types import JSONRPCMessage
 
 from discord_mcp.persistence.adapters.base import EventStoreAdapter
@@ -23,10 +17,10 @@ class PersistentEventStore(EventStore):
     def __init__(self, adapter: EventStoreAdapter) -> None:
         self._adapter = adapter
 
-    async def store_event(self, stream_id: EventId, message: JSONRPCMessage) -> EventId:
+    async def store_event(self, stream_id: StreamId, message: JSONRPCMessage) -> EventId:
         async with self._adapter as adapter:
             event = EventRecord(
-                stream_id=StreamId(stream_id),
+                stream_id=stream_id,
                 message=message,
             )
             await adapter.insert_event(event)

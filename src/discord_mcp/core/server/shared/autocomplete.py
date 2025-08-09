@@ -5,13 +5,7 @@ import asyncio
 import typing as t
 
 import typing_extensions
-from mcp.types import (
-    Completion,
-    CompletionArgument,
-    CompletionContext,
-    PromptReference,
-    ResourceTemplateReference,
-)
+from mcp.types import Completion, CompletionArgument, CompletionContext, PromptReference, ResourceTemplateReference
 
 from discord_mcp.core.server.prompts.manager import DiscordMCPPrompt
 from discord_mcp.core.server.resources.manager import DiscordMCPResourceTemplate
