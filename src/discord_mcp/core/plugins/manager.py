@@ -271,26 +271,8 @@ class DiscordMCPPluginManager:
             description=description,
         )
 
-    @t.overload
+    @staticmethod
     def limit(
-        self,
-        ratelimiter_or_type: type[RateLimiter],
-        rate: int,
-        per: float,
-        get_bucket_key: t.Callable[[DiscordMCPContext], t.Hashable] = get_bucket_key,
-    ) -> t.Callable[[t.Callable[..., t.Any]], t.Callable[..., t.Any]]: ...
-
-    @t.overload
-    def limit(
-        self,
-        ratelimiter_or_type: RateLimitType,
-        rate: int,
-        per: float,
-        get_bucket_key: t.Callable[[DiscordMCPContext], t.Hashable] = get_bucket_key,
-    ) -> t.Callable[[t.Callable[..., t.Any]], t.Callable[..., t.Any]]: ...
-
-    def limit(
-        self,
         ratelimiter_or_type: type[RateLimiter] | RateLimitType,
         rate: int,
         per: float,
@@ -317,10 +299,10 @@ class DiscordMCPPluginManager:
             ValueError: If ratelimiter_or_type is neither a valid RateLimitType enum
                 nor a RateLimiter subclass.
         Example:
-            @limit(RateLimitType.FIXED_WINDOW, rate=5, per=60.0)
+            @manager.limit(RateLimitType.FIXED_WINDOW, rate=5, per=60.0)
             def my_function():
                 pass
-            @limit(CustomRateLimiter, rate=10, per=30.0)
+            @manager.limit(CustomRateLimiter, rate=10, per=30.0)
             def another_function():
                 pass
         """

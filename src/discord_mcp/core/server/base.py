@@ -38,6 +38,8 @@ from pydantic.networks import AnyUrl
 from starlette.requests import Request
 
 from discord_mcp.core.discord_ext.bot import DiscordMCPBot
+from discord_mcp.core.plugins.cooldowns.base import RateLimiter
+from discord_mcp.core.plugins.cooldowns.manager import get_bucket_key
 from discord_mcp.core.plugins.manager import DiscordMCPPluginManager
 from discord_mcp.core.server.middleware import (
     CallNext,
@@ -56,7 +58,7 @@ from discord_mcp.core.server.shared.session import DiscordMCPServerSession
 from discord_mcp.core.server.tools.manager import DiscordMCPToolManager
 from discord_mcp.utils.checks import find_kwarg_by_type
 from discord_mcp.utils.converters import convert_name_to_title, extract_mime_type_from_fn_return
-from discord_mcp.utils.enums import ErrorCodes
+from discord_mcp.utils.enums import ErrorCodes, RateLimitType
 from discord_mcp.utils.exceptions import (
     PromptNotFoundError,
     PromptRenderError,
@@ -291,15 +293,17 @@ class BaseDiscordMCPServer(Server[DiscordMCPLifespanResult, RequestT]):
                     annotations=annotations,
                     structured_output=structured_output,
                 )
+
             manifest = ToolManifest(
                 fn=fn,
-                name=name,
+                name=name or fn.__name__,
                 title=title,
                 description=description,
                 annotations=annotations,
                 structured_output=structured_output,
                 enabled=enabled,
             )
+            self._manifest_repository.add_manifest(manifest)
             return manifest
 
         return decorator
@@ -420,6 +424,7 @@ class BaseDiscordMCPServer(Server[DiscordMCPLifespanResult, RequestT]):
                 mime_type=mime_type,
                 enabled=enabled,
             )
+            self._manifest_repository.add_manifest(manifest)
             return manifest
 
         return decorator
@@ -501,11 +506,12 @@ class BaseDiscordMCPServer(Server[DiscordMCPLifespanResult, RequestT]):
 
             manifest = PromptManifest(
                 fn=func,
-                name=name,
+                name=name or func.__name__,
                 description=description,
                 title=title,
                 enabled=enabled,
             )
+            self._manifest_repository.add_manifest(manifest)
             return manifest
 
         return decorator
@@ -546,6 +552,48 @@ class BaseDiscordMCPServer(Server[DiscordMCPLifespanResult, RequestT]):
         except Exception as e:
             logger.exception(f"Error getting prompt {name}")
             raise PromptRenderError(str(e))
+
+    @staticmethod
+    def limit(
+        ratelimiter_or_type: type[RateLimiter] | RateLimitType,
+        rate: int,
+        per: float,
+        get_bucket_key: t.Callable[[DiscordMCPContext], t.Hashable] = get_bucket_key,
+    ) -> t.Callable[[t.Callable[..., t.Any]], t.Callable[..., t.Any]]:
+        """
+        Decorator to apply rate limiting to a function.
+        This decorator adds rate limiting functionality to any function by attaching a
+        CooldownManager instance. The rate limiter controls how frequently the decorated
+        function can be called based on the specified parameters.
+        Args:
+            ratelimiter_or_type (type[RateLimiter] | RateLimitType): Either a RateLimitType
+                enum value (FIXED_WINDOW, TOKEN_BUCKET, MOVING_WINDOW) or a custom
+                RateLimiter subclass.
+            rate (int): The maximum number of calls allowed within the time window.
+            per (float): The time window duration in seconds.
+            get_bucket_key (Callable[[DiscordMCPContext], Hashable], optional): A function
+                that takes a DiscordMCPContext and returns a hashable key for bucketing
+                rate limits. Defaults to the global get_bucket_key function.
+        Returns:
+            Callable: A decorator function that can be applied to any callable to add
+            rate limiting functionality.
+        Raises:
+            ValueError: If ratelimiter_or_type is neither a valid RateLimitType enum
+                nor a RateLimiter subclass.
+        Example:
+            @mcp.limit(RateLimitType.FIXED_WINDOW, rate=5, per=60.0)
+            def my_function():
+                pass
+            @mcp.limit(CustomRateLimiter, rate=10, per=30.0)
+            def another_function():
+                pass
+        """
+        return DiscordMCPPluginManager.limit(
+            ratelimiter_or_type=ratelimiter_or_type,
+            rate=rate,
+            per=per,
+            get_bucket_key=get_bucket_key,
+        )
 
     async def run(
         self,
