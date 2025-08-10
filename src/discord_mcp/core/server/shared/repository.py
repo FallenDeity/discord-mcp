@@ -18,8 +18,6 @@ class ManifestRepository:
 
         manifest_type = type(manifest)
         key = manifest.uri if isinstance(manifest, ResourceManifest) else manifest.name
-        if key is None:
-            raise ValueError("Manifest must have a name or URI")
         self._manifests[manifest_type][key] = manifest
 
     def get_manifest(self, manifest_type: type[BaseManifest], key: str) -> BaseManifest | None:
