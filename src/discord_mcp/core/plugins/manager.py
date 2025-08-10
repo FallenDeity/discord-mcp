@@ -318,7 +318,7 @@ class DiscordMCPPluginManager:
             elif isinstance(ratelimiter_or_type, type) and issubclass(ratelimiter_or_type, RateLimiter):  # type: ignore
                 _limiter_cls = ratelimiter_or_type
             else:
-                raise ValueError("ratelimiter_or_type must be a RateLimitType enum or a RateLimiter subclass")
+                raise ValueError(f"ratelimiter_or_type must be a RateLimitType enum or a RateLimiter subclass, got {ratelimiter_or_type.__class__.__name__!r}.")
             setattr(fn, "__cooldown_manager__", CooldownManager(_limiter_cls(rate, per), get_bucket_key))
             return fn
 
