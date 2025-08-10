@@ -25,61 +25,40 @@ from mcp.shared.context import RequestContext
 from mcp.shared.exceptions import McpError
 from mcp.shared.message import ClientMessageMetadata, ServerMessageMetadata, SessionMessage
 from mcp.shared.session import RequestResponder
-from mcp.types import (
-    AnyFunction,
-    Completion,
-    CompletionArgument,
-    CompletionContext,
-    ContentBlock,
-    GetPromptResult,
-)
+from mcp.types import AnyFunction, Completion, CompletionArgument, CompletionContext, ContentBlock, GetPromptResult
 from mcp.types import Prompt as MCPPrompt
 from mcp.types import PromptArgument as MCPPromptArgument
-from mcp.types import (
-    PromptReference,
-)
+from mcp.types import PromptReference
 from mcp.types import Resource as MCPResource
 from mcp.types import ResourceTemplate as MCPResourceTemplate
-from mcp.types import (
-    ResourceTemplateReference,
-)
+from mcp.types import ResourceTemplateReference
 from mcp.types import Tool as MCPTool
-from mcp.types import (
-    ToolAnnotations,
-)
+from mcp.types import ToolAnnotations
 from pydantic.networks import AnyUrl
 from starlette.requests import Request
 
 from discord_mcp.core.discord_ext.bot import DiscordMCPBot
+from discord_mcp.core.plugins.cooldowns.base import RateLimiter
+from discord_mcp.core.plugins.cooldowns.manager import get_bucket_key
 from discord_mcp.core.plugins.manager import DiscordMCPPluginManager
 from discord_mcp.core.server.middleware import (
     CallNext,
     LoggingMiddleware,
     Middleware,
     MiddlewareContext,
+    RateLimitMiddleware,
 )
 from discord_mcp.core.server.prompts.manager import DiscordMCPPrompt, DiscordMCPPromptManager
-from discord_mcp.core.server.resources.manager import (
-    DiscordMCPFunctionResource,
-    DiscordMCPResourceManager,
-)
+from discord_mcp.core.server.resources.manager import DiscordMCPFunctionResource, DiscordMCPResourceManager
 from discord_mcp.core.server.shared.autocomplete import AutocompleteHandler
-from discord_mcp.core.server.shared.context import (
-    DiscordMCPContext,
-    DiscordMCPLifespanResult,
-    get_context,
-)
-from discord_mcp.core.server.shared.manifests import (
-    BaseManifest,
-    PromptManifest,
-    ResourceManifest,
-    ToolManifest,
-)
+from discord_mcp.core.server.shared.context import DiscordMCPContext, DiscordMCPLifespanResult, get_context
+from discord_mcp.core.server.shared.manifests import BaseManifest, PromptManifest, ResourceManifest, ToolManifest
+from discord_mcp.core.server.shared.repository import ManifestRepository
 from discord_mcp.core.server.shared.session import DiscordMCPServerSession
 from discord_mcp.core.server.tools.manager import DiscordMCPToolManager
 from discord_mcp.utils.checks import find_kwarg_by_type
 from discord_mcp.utils.converters import convert_name_to_title, extract_mime_type_from_fn_return
-from discord_mcp.utils.enums import ErrorCodes
+from discord_mcp.utils.enums import ErrorCodes, RateLimitType
 from discord_mcp.utils.exceptions import (
     PromptNotFoundError,
     PromptRenderError,
@@ -130,7 +109,7 @@ class BaseDiscordMCPServer(Server[DiscordMCPLifespanResult, RequestT]):
     ) -> None:
         self.bot = bot
         self.settings = settings
-        self.middlewares: list[Middleware] = [LoggingMiddleware()]
+        self.middlewares: list[Middleware] = [LoggingMiddleware(), RateLimitMiddleware()]
         self._tool_manager = DiscordMCPToolManager(warn_on_duplicate_tools=self.settings.warn_on_duplicate_tools)
         self._resource_manager = DiscordMCPResourceManager(
             warn_on_duplicate_resources=self.settings.warn_on_duplicate_resources
@@ -139,6 +118,7 @@ class BaseDiscordMCPServer(Server[DiscordMCPLifespanResult, RequestT]):
             warn_on_duplicate_prompts=self.settings.warn_on_duplicate_prompts
         )
         self._autocomplete_callbacks: dict[str, AutocompleteHandler] = dict()
+        self._manifest_repository = ManifestRepository()
         super().__init__(*args, name=name, **kwargs)
         self._setup_handlers()
         self._load_plugins(path=PLUGINS_PATH.as_posix())
@@ -313,6 +293,7 @@ class BaseDiscordMCPServer(Server[DiscordMCPLifespanResult, RequestT]):
                     annotations=annotations,
                     structured_output=structured_output,
                 )
+
             manifest = ToolManifest(
                 fn=fn,
                 name=name,
@@ -322,6 +303,7 @@ class BaseDiscordMCPServer(Server[DiscordMCPLifespanResult, RequestT]):
                 structured_output=structured_output,
                 enabled=enabled,
             )
+            self._manifest_repository.add_manifest(manifest)
             return manifest
 
         return decorator
@@ -442,6 +424,7 @@ class BaseDiscordMCPServer(Server[DiscordMCPLifespanResult, RequestT]):
                 mime_type=mime_type,
                 enabled=enabled,
             )
+            self._manifest_repository.add_manifest(manifest)
             return manifest
 
         return decorator
@@ -528,6 +511,7 @@ class BaseDiscordMCPServer(Server[DiscordMCPLifespanResult, RequestT]):
                 title=title,
                 enabled=enabled,
             )
+            self._manifest_repository.add_manifest(manifest)
             return manifest
 
         return decorator
@@ -568,6 +552,48 @@ class BaseDiscordMCPServer(Server[DiscordMCPLifespanResult, RequestT]):
         except Exception as e:
             logger.exception(f"Error getting prompt {name}")
             raise PromptRenderError(str(e))
+
+    @staticmethod
+    def limit(
+        ratelimiter_or_type: type[RateLimiter] | RateLimitType,
+        rate: int,
+        per: float,
+        get_bucket_key: t.Callable[[DiscordMCPContext], t.Hashable] = get_bucket_key,
+    ) -> t.Callable[[t.Callable[..., t.Any]], t.Callable[..., t.Any]]:
+        """
+        Decorator to apply rate limiting to a function.
+        This decorator adds rate limiting functionality to any function by attaching a
+        CooldownManager instance. The rate limiter controls how frequently the decorated
+        function can be called based on the specified parameters.
+        Args:
+            ratelimiter_or_type (type[RateLimiter] | RateLimitType): Either a RateLimitType
+                enum value (FIXED_WINDOW, TOKEN_BUCKET, MOVING_WINDOW) or a custom
+                RateLimiter subclass.
+            rate (int): The maximum number of calls allowed within the time window.
+            per (float): The time window duration in seconds.
+            get_bucket_key (Callable[[DiscordMCPContext], Hashable], optional): A function
+                that takes a DiscordMCPContext and returns a hashable key for bucketing
+                rate limits. Defaults to the global get_bucket_key function.
+        Returns:
+            Callable: A decorator function that can be applied to any callable to add
+            rate limiting functionality.
+        Raises:
+            ValueError: If ratelimiter_or_type is neither a valid RateLimitType enum
+                nor a RateLimiter subclass.
+        Example:
+            @mcp.limit(RateLimitType.FIXED_WINDOW, rate=5, per=60.0)
+            def my_function():
+                pass
+            @mcp.limit(CustomRateLimiter, rate=10, per=30.0)
+            def another_function():
+                pass
+        """
+        return DiscordMCPPluginManager.limit(
+            ratelimiter_or_type=ratelimiter_or_type,
+            rate=rate,
+            per=per,
+            get_bucket_key=get_bucket_key,
+        )
 
     async def run(
         self,
@@ -760,6 +786,7 @@ class BaseDiscordMCPServer(Server[DiscordMCPLifespanResult, RequestT]):
             self._autocomplete_callbacks[name] = manifest._autocomplete_handler  # type: ignore
 
     def _load_manifests(self, manifests: list[BaseManifest]) -> None:
+        self._manifest_repository.add_manifests(manifests)
         for manifest in manifests:
             if isinstance(manifest, ToolManifest):
                 if manifest.enabled:

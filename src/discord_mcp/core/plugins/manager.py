@@ -5,13 +5,24 @@ import typing as t
 
 from mcp.types import ToolAnnotations
 
+from discord_mcp.core.plugins.cooldowns import (
+    CooldownManager,
+    FixedWindowRateLimiter,
+    MovingWindowRateLimiter,
+    RateLimiter,
+    TokenBucketRateLimiter,
+    get_bucket_key,
+)
 from discord_mcp.core.server.shared.manifests import BaseManifest, PromptManifest, ResourceManifest, ToolManifest
+from discord_mcp.utils.enums import RateLimitType
+
+if t.TYPE_CHECKING:
+    from discord_mcp.core.server.shared.context import DiscordMCPContext
 
 __all__: tuple[str, ...] = ("DiscordMCPPluginManager",)
 
 
 ManifestT = t.TypeVar("ManifestT", bound=BaseManifest)
-AnyManifest = ToolManifest | ResourceManifest | PromptManifest
 
 
 class DiscordMCPPluginManager:
@@ -259,3 +270,58 @@ class DiscordMCPPluginManager:
             title=title,
             description=description,
         )
+
+    @staticmethod
+    def limit(
+        ratelimiter_or_type: type[RateLimiter] | RateLimitType,
+        rate: int,
+        per: float,
+        get_bucket_key: t.Callable[[DiscordMCPContext], t.Hashable] = get_bucket_key,
+    ) -> t.Callable[[t.Callable[..., t.Any]], t.Callable[..., t.Any]]:
+        """
+        Decorator to apply rate limiting to a function.
+        This decorator adds rate limiting functionality to any function by attaching a
+        CooldownManager instance. The rate limiter controls how frequently the decorated
+        function can be called based on the specified parameters.
+        Args:
+            ratelimiter_or_type (type[RateLimiter] | RateLimitType): Either a RateLimitType
+                enum value (FIXED_WINDOW, TOKEN_BUCKET, MOVING_WINDOW) or a custom
+                RateLimiter subclass.
+            rate (int): The maximum number of calls allowed within the time window.
+            per (float): The time window duration in seconds.
+            get_bucket_key (Callable[[DiscordMCPContext], Hashable], optional): A function
+                that takes a DiscordMCPContext and returns a hashable key for bucketing
+                rate limits. Defaults to the global get_bucket_key function.
+        Returns:
+            Callable: A decorator function that can be applied to any callable to add
+            rate limiting functionality.
+        Raises:
+            ValueError: If ratelimiter_or_type is neither a valid RateLimitType enum
+                nor a RateLimiter subclass.
+        Example:
+            @manager.limit(RateLimitType.FIXED_WINDOW, rate=5, per=60.0)
+            def my_function():
+                pass
+            @manager.limit(CustomRateLimiter, rate=10, per=30.0)
+            def another_function():
+                pass
+        """
+        _limiter_map: dict[RateLimitType, t.Type[RateLimiter]] = {
+            RateLimitType.FIXED_WINDOW: FixedWindowRateLimiter,
+            RateLimitType.TOKEN_BUCKET: TokenBucketRateLimiter,
+            RateLimitType.MOVING_WINDOW: MovingWindowRateLimiter,
+        }
+
+        def decorator(fn: t.Callable[..., t.Any]) -> t.Callable[..., t.Any]:
+            if isinstance(ratelimiter_or_type, RateLimitType) and ratelimiter_or_type in _limiter_map:
+                _limiter_cls = _limiter_map[ratelimiter_or_type]
+            elif isinstance(ratelimiter_or_type, type) and issubclass(ratelimiter_or_type, RateLimiter):  # type: ignore
+                _limiter_cls = ratelimiter_or_type
+            else:
+                raise ValueError(
+                    f"ratelimiter_or_type must be a RateLimitType enum or a RateLimiter subclass, got {ratelimiter_or_type.__class__.__name__!r}."
+                )
+            setattr(fn, "__cooldown_manager__", CooldownManager(_limiter_cls(rate, per), get_bucket_key))
+            return fn
+
+        return decorator

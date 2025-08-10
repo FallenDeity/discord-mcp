@@ -9,7 +9,16 @@ __all__: tuple[str, ...] = (
     "MiddlewareNotificationMethods",
     "ServerType",
     "ResourceReturnType",
+    "RateLimitType",
 )
+
+
+class RateLimitType(enum.StrEnum):
+    """Enum for rate limit types."""
+
+    FIXED_WINDOW = "fixed_window"
+    TOKEN_BUCKET = "token_bucket"
+    MOVING_WINDOW = "moving_window"
 
 
 class ErrorCodes(enum.IntEnum):

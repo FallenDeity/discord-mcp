@@ -8,6 +8,10 @@ from discord_mcp.core.server.prompts import DiscordMCPPrompt
 from discord_mcp.core.server.resources import DiscordMCPResourceTemplate
 from discord_mcp.core.server.shared.autocomplete import AutoCompletable, AutocompleteHandler
 
+if t.TYPE_CHECKING:
+    from discord_mcp.core.plugins.cooldowns import CooldownManager
+
+
 __all__: tuple[str, ...] = (
     "BaseManifest",
     "ToolManifest",
@@ -26,10 +30,11 @@ class BaseManifest:
         enabled: bool = True,
     ) -> None:
         self.fn = fn
-        self.name = name
+        self.name = name or fn.__name__
         self.title = title
         self.description = description
         self.enabled = enabled
+        self.cooldown: CooldownManager | None = getattr(fn, "__cooldown_manager__", None)
 
     def __call__(self, *_: t.Any, **__: t.Any) -> t.Any:
         raise NotImplementedError
@@ -78,5 +83,4 @@ class PromptManifest(BaseManifest, AutoCompletable[DiscordMCPPrompt, PromptRefer
         enabled: bool = True,
     ) -> None:
         super().__init__(fn, name, title, description, enabled)
-        self.name = name or fn.__name__
         self._autocomplete_handler = AutocompleteHandler(self)
