@@ -30,7 +30,7 @@ class BaseManifest:
         enabled: bool = True,
     ) -> None:
         self.fn = fn
-        self.name = name
+        self.name = name or fn.__name__
         self.title = title
         self.description = description
         self.enabled = enabled
@@ -83,5 +83,4 @@ class PromptManifest(BaseManifest, AutoCompletable[DiscordMCPPrompt, PromptRefer
         enabled: bool = True,
     ) -> None:
         super().__init__(fn, name, title, description, enabled)
-        self.name = name or fn.__name__
         self._autocomplete_handler = AutocompleteHandler(self)

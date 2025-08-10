@@ -296,7 +296,7 @@ class BaseDiscordMCPServer(Server[DiscordMCPLifespanResult, RequestT]):
 
             manifest = ToolManifest(
                 fn=fn,
-                name=name or fn.__name__,
+                name=name,
                 title=title,
                 description=description,
                 annotations=annotations,
@@ -506,7 +506,7 @@ class BaseDiscordMCPServer(Server[DiscordMCPLifespanResult, RequestT]):
 
             manifest = PromptManifest(
                 fn=func,
-                name=name or func.__name__,
+                name=name,
                 description=description,
                 title=title,
                 enabled=enabled,
