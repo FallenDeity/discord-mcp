@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import asyncio
 import functools
+import inspect
 import types
 import typing as t
 
@@ -378,7 +378,7 @@ class DiscordMCPPluginManager:
 
         @functools.wraps(predicate)
         async def wrapped_predicate(context: MiddlewareContext[PredicateRequestT]) -> bool:
-            if asyncio.iscoroutinefunction(predicate):
+            if inspect.iscoroutinefunction(predicate):
                 return await predicate(context)
             return t.cast(bool, predicate(context))
 

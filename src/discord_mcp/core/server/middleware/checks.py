@@ -37,9 +37,12 @@ class ChecksMiddleware(Middleware):
         manifest = server._manifest_repository.get_manifest(manifest_cls, key)
         if manifest is None or not manifest.enabled or not manifest.checks:
             return await call_next(ctx)
-        check_results = {predicate: await predicate(ctx) for predicate in manifest.checks}
-        if not all(check_results.values()):
-            raise CheckFailureError(f"Checks failed for {ctx.method} on {key}! [Predicates: {check_results}]")
+        # Sometimes a large steps of checks might be broken into smaller ones
+        # with a subsequent check depending on the previous ones, hence asyncio.gather might not be suitable
+        # fail fast on first failure instead
+        for predicate in manifest.checks:
+            if not await predicate(ctx):
+                raise CheckFailureError(f"Checks failed for {ctx.method} on {key}! [Predicate: {predicate.__name__}]")
         return await call_next(ctx)
 
     async def on_call_tool(
