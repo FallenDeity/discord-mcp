@@ -40,9 +40,10 @@ from starlette.requests import Request
 from discord_mcp.core.discord_ext.bot import DiscordMCPBot
 from discord_mcp.core.plugins.cooldowns.base import RateLimiter
 from discord_mcp.core.plugins.cooldowns.manager import get_bucket_key
-from discord_mcp.core.plugins.manager import DiscordMCPPluginManager
+from discord_mcp.core.plugins.manager import Check, CoroFuncT, DiscordMCPPluginManager, PredicateRequestT, PredicateT
 from discord_mcp.core.server.middleware import (
     CallNext,
+    ChecksMiddleware,
     LoggingMiddleware,
     Middleware,
     MiddlewareContext,
@@ -109,7 +110,7 @@ class BaseDiscordMCPServer(Server[DiscordMCPLifespanResult, RequestT]):
     ) -> None:
         self.bot = bot
         self.settings = settings
-        self.middlewares: list[Middleware] = [LoggingMiddleware(), RateLimitMiddleware()]
+        self.middlewares: list[Middleware] = [LoggingMiddleware(), RateLimitMiddleware(), ChecksMiddleware()]
         self._tool_manager = DiscordMCPToolManager(warn_on_duplicate_tools=self.settings.warn_on_duplicate_tools)
         self._resource_manager = DiscordMCPResourceManager(
             warn_on_duplicate_resources=self.settings.warn_on_duplicate_resources
@@ -594,6 +595,36 @@ class BaseDiscordMCPServer(Server[DiscordMCPLifespanResult, RequestT]):
             per=per,
             get_bucket_key=get_bucket_key,
         )
+
+    @staticmethod
+    def check(predicate: PredicateT[PredicateRequestT, CoroFuncT[bool] | bool]) -> Check[PredicateRequestT]:
+        """
+        A decorator that adds a predicate check to a function.
+        This decorator allows you to attach predicate functions to other functions,
+        which can be used for validation or authorization purposes. The predicate
+        can be either synchronous or asynchronous.
+        Args:
+            predicate (PredicateT): A callable that takes a MiddlewareContext
+                and returns a boolean or awaitable boolean.  The predicate is wrapped
+                in a coroutine to ensure consistent behavior.
+        Returns:
+            Callable: A decorator function that can be applied to other functions
+                to add the predicate check.
+        Example:
+            ```python
+            def has_bot(ctx):
+                return ctx.context.bot.user is not None
+            @mcp.check(has_bot)
+            def bot_command():
+                pass
+            ```
+        Note:
+            The decorated function will have a `__checks__` attribute containing
+            a list of all applied predicates, and the decorator itself will have
+            a `__predicate__` attribute containing the (possibly wrapped) predicate.
+            This can be used for extending already defined checks.
+        """
+        return DiscordMCPPluginManager.check(predicate)
 
     async def run(
         self,
