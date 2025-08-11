@@ -18,6 +18,7 @@ if t.TYPE_CHECKING:
 user_tools_manager = DiscordMCPPluginManager(name="user-tools")
 
 
+# NOTE: These are just some basic checks for testing purposes
 def has_bot_user(ctx: MiddlewareContext[CallToolRequest]) -> bool:
     return ctx.context.bot.user is not None
 
@@ -33,6 +34,7 @@ def is_bot_id(bot_id: int):
 
 @user_tools_manager.register_tool
 @user_tools_manager.check(has_bot_user)
+# TODO: A test case set to fail, to ensure it works (to be removed soon)
 @is_bot_id(1)
 async def get_current_user(ctx: DiscordMCPContext) -> DiscordUser:
     """Get the current bot user."""

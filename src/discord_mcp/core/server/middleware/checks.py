@@ -37,7 +37,7 @@ class ChecksMiddleware(Middleware):
         manifest = server._manifest_repository.get_manifest(manifest_cls, key)
         if manifest is None or not manifest.enabled or not manifest.checks:
             return await call_next(ctx)
-        # Sometimes a large steps of checks might be broken into smaller ones
+        # Sometimes checks with a large number of steps might be broken into smaller ones
         # with a subsequent check depending on the previous ones, hence asyncio.gather might not be suitable
         # fail fast on first failure instead
         for predicate in manifest.checks:
