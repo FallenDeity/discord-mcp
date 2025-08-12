@@ -24,10 +24,6 @@ if t.TYPE_CHECKING:
 
 __all__: tuple[str, ...] = (
     "DiscordMCPPluginManager",
-    "ManifestT",
-    "CoroFuncT",
-    "PredicateRequestT",
-    "PredicateT",
     "Check",
 )
 
