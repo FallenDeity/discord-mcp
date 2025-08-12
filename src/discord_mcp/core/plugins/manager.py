@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import functools
+import inspect
 import types
 import typing as t
 
-from mcp.types import ToolAnnotations
+from mcp.types import CallToolRequest, GetPromptRequest, ReadResourceRequest, ToolAnnotations
 
 from discord_mcp.core.plugins.cooldowns import (
     CooldownManager,
@@ -13,16 +15,31 @@ from discord_mcp.core.plugins.cooldowns import (
     TokenBucketRateLimiter,
     get_bucket_key,
 )
+from discord_mcp.core.server.middleware import MiddlewareContext
 from discord_mcp.core.server.shared.manifests import BaseManifest, PromptManifest, ResourceManifest, ToolManifest
 from discord_mcp.utils.enums import RateLimitType
 
 if t.TYPE_CHECKING:
     from discord_mcp.core.server.shared.context import DiscordMCPContext
 
-__all__: tuple[str, ...] = ("DiscordMCPPluginManager",)
+__all__: tuple[str, ...] = (
+    "DiscordMCPPluginManager",
+    "Check",
+)
 
+T = t.TypeVar("T", bound=t.Any)
 
 ManifestT = t.TypeVar("ManifestT", bound=BaseManifest)
+CoroFuncT = t.Coroutine[t.Any, t.Any, T]
+
+PredicateRequestT = t.TypeVar("PredicateRequestT", bound=CallToolRequest | GetPromptRequest | ReadResourceRequest)
+PredicateT = t.Callable[[MiddlewareContext[PredicateRequestT]], T]
+
+
+class Check(t.Protocol[PredicateRequestT]):
+    __predicate__: PredicateT[PredicateRequestT, CoroFuncT[bool]]
+
+    def __call__(self, fn: T) -> T: ...
 
 
 class DiscordMCPPluginManager:
@@ -325,3 +342,48 @@ class DiscordMCPPluginManager:
             return fn
 
         return decorator
+
+    @staticmethod
+    def check(predicate: PredicateT[PredicateRequestT, CoroFuncT[bool] | bool]) -> Check[PredicateRequestT]:
+        """
+        A decorator that adds a predicate check to a function.
+        This decorator allows you to attach predicate functions to other functions,
+        which can be used for validation or authorization purposes. The predicate
+        can be either synchronous or asynchronous.
+        Args:
+            predicate (PredicateT): A callable that takes a MiddlewareContext
+                and returns a boolean or awaitable boolean.  The predicate is wrapped
+                in a coroutine to ensure consistent behavior.
+        Returns:
+            Callable: A decorator function that can be applied to other functions
+                to add the predicate check.
+        Example:
+            ```python
+            def has_bot(ctx):
+                return ctx.context.bot.user is not None
+            @manager.check(has_bot)
+            def bot_command():
+                pass
+            ```
+        Note:
+            The decorated function will have a `__checks__` attribute containing
+            a list of all applied predicates, and the decorator itself will have
+            a `__predicate__` attribute containing the (possibly wrapped) predicate.
+            This can be used for extending already defined checks.
+        """
+
+        @functools.wraps(predicate)
+        async def wrapped_predicate(context: MiddlewareContext[PredicateRequestT]) -> bool:
+            if inspect.iscoroutinefunction(predicate):
+                return await predicate(context)
+            return t.cast(bool, predicate(context))
+
+        def decorator(fn: t.Callable[..., t.Any]) -> t.Callable[..., t.Any]:
+            if not hasattr(fn, "__checks__"):
+                setattr(fn, "__checks__", [])
+            getattr(fn, "__checks__").append(wrapped_predicate)
+            return fn
+
+        setattr(decorator, "__predicate__", wrapped_predicate)
+
+        return decorator  # type: ignore

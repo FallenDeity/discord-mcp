@@ -10,6 +10,7 @@ from discord_mcp.core.server.shared.autocomplete import AutoCompletable, Autocom
 
 if t.TYPE_CHECKING:
     from discord_mcp.core.plugins.cooldowns import CooldownManager
+    from discord_mcp.core.plugins.manager import CoroFuncT, PredicateT
 
 
 __all__: tuple[str, ...] = (
@@ -35,6 +36,8 @@ class BaseManifest:
         self.description = description
         self.enabled = enabled
         self.cooldown: CooldownManager | None = getattr(fn, "__cooldown_manager__", None)
+        self.checks: list[PredicateT[t.Any, CoroFuncT[bool]]] = getattr(fn, "__checks__", [])
+        self.checks.reverse()
 
     def __call__(self, *_: t.Any, **__: t.Any) -> t.Any:
         raise NotImplementedError

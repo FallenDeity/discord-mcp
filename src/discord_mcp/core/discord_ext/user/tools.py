@@ -2,24 +2,43 @@ from __future__ import annotations
 
 import typing as t
 
+from mcp.types import CallToolRequest
+
 from discord_mcp.core.plugins import DiscordMCPPluginManager
 from discord_mcp.core.server.shared.context import DiscordMCPContext
 from discord_mcp.utils.enums import RateLimitType
 
+from .models import DiscordUser
+
 if t.TYPE_CHECKING:
+    from discord_mcp.core.server.middleware import MiddlewareContext
     from discord_mcp.core.server.resources.manager import DiscordMCPResourceTemplate
 
-
-from .models import DiscordUser
 
 user_tools_manager = DiscordMCPPluginManager(name="user-tools")
 
 
+# NOTE: These are just some basic checks for testing purposes
+def has_bot_user(ctx: MiddlewareContext[CallToolRequest]) -> bool:
+    return ctx.context.bot.user is not None
+
+
+def is_bot_id(bot_id: int):
+    original = user_tools_manager.check(has_bot_user).__predicate__
+
+    async def extended_check(ctx: MiddlewareContext[CallToolRequest]):
+        return await original(ctx) and ctx.context.bot.user.id == bot_id  # type: ignore Already verified in check
+
+    return user_tools_manager.check(extended_check)
+
+
 @user_tools_manager.register_tool
+@user_tools_manager.check(has_bot_user)
+# TODO: A test case set to fail, to ensure it works (to be removed soon)
+@is_bot_id(1)
 async def get_current_user(ctx: DiscordMCPContext) -> DiscordUser:
     """Get the current bot user."""
-    assert ctx.bot.user is not None, "Bot user is not set"
-    return DiscordUser.from_discord_user(ctx.bot.user)
+    return DiscordUser.from_discord_user(ctx.bot.user)  # type: ignore Already verified in check
 
 
 @user_tools_manager.register_tool
