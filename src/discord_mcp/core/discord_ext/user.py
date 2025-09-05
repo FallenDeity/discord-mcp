@@ -8,7 +8,7 @@ from discord_mcp.core.plugins import DiscordMCPPluginManager
 from discord_mcp.core.server.shared.context import DiscordMCPContext
 from discord_mcp.utils.enums import RateLimitType
 
-from .models import DiscordUser
+from discord_mcp.core.discord_ext.models import DiscordUser
 
 if t.TYPE_CHECKING:
     from discord_mcp.core.server.middleware import MiddlewareContext
