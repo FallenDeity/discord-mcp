@@ -80,7 +80,7 @@ class PartialUser(pydantic.BaseModel):
     )
 
     @classmethod
-    def from_discord_user(cls, user: discord.User) -> PartialUser:
+    def from_discord_user(cls, user: discord.User | discord.Member | discord.user.BaseUser) -> PartialUser:
         """Create a PartialUser instance from a discord.User object."""
         return cls(
             id=str(user.id),
@@ -111,13 +111,30 @@ class User(PartialUser):
         default=None, description="Whether the email on the user's account has been verified, if available."
     )
     email: str | None = pydantic.Field(default=None, description="The user's email address, if available.")
-    flags: int | None = pydantic.Field(
+    flags: list[str] | None = pydantic.Field(
         default=None, description="The flags for the user, such as 'Verified', 'Partner', etc."
     )
     premium_type: PremiumType | None = pydantic.Field(
         default=None,
         description="The type of Nitro subscription on the user's account, if any. 0 for None, 1 for Nitro Classic, 2 for Nitro, 3 for Nitro Basic.",
     )
-    public_flags: int | None = pydantic.Field(
-        default=None, description="The public flags for the user, such as 'Staff', 'Partner', etc."
+    public_flags: list[str] = pydantic.Field(
+        description="The public flags for the user, such as 'Staff', 'Partner', etc."
     )
+
+    @classmethod
+    def from_discord_user(cls, user: discord.User | discord.Member | discord.user.BaseUser) -> User:
+        """Create a User instance from a discord.User object."""
+        return cls(
+            **PartialUser.from_discord_user(user).model_dump(),
+            bot=user.bot,
+            # TODO: Decide what to do with these fields since they are more oauth2 related and not available on a regular discord.User object.
+            system=getattr(user, "system", None),
+            mfa_enabled=getattr(user, "mfa_enabled", None),
+            locale=getattr(user, "locale", None),
+            verified=getattr(user, "verified", None),
+            email=getattr(user, "email", None),
+            flags=[name for name, value in user.flags if value] if isinstance(user, discord.Member) else None,
+            premium_type=getattr(user, "premium_type", None),
+            public_flags=[name for name, value in user.public_flags if value],
+        )

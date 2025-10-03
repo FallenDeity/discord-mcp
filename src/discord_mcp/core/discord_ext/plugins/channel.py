@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import typing as t
 
 import discord
@@ -8,6 +9,7 @@ from discord_mcp.core.plugins import DiscordMCPPluginManager
 from discord_mcp.core.server.shared.context import DiscordMCPContext
 
 from ..models.channel import Channel, ChannelUpdate, _discord_channel_to_pydantic
+from ..models.invite import Invite, InviteCreationOptions
 from ..models.response import CallToolResponse
 
 # if t.TYPE_CHECKING:
@@ -15,9 +17,11 @@ from ..models.response import CallToolResponse
 #     from discord_mcp.core.server.resources.manager import DiscordMCPResourceTemplate
 
 
+logger = logging.getLogger(__name__)
 channel_manager = DiscordMCPPluginManager(name="channel")
 
 
+ChannelT = discord.abc.GuildChannel | discord.abc.PrivateChannel | discord.Thread
 PermissionFlags = list[t.Literal[*list(discord.Permissions.VALID_FLAGS.keys())]]
 
 
@@ -57,7 +61,9 @@ async def get_channel(ctx: DiscordMCPContext, channel_id: str) -> Channel:
 
 
 @channel_manager.register_tool
-async def edit_channel(ctx: DiscordMCPContext, channel_id: str, update: ChannelUpdate) -> Channel:
+async def edit_channel(
+    ctx: DiscordMCPContext, channel_id: str, update: ChannelUpdate, reason: str | None = None
+) -> Channel:
     """
     Edit a channel by its ID.
 
@@ -69,13 +75,13 @@ async def edit_channel(ctx: DiscordMCPContext, channel_id: str, update: ChannelU
         The ID of the channel to edit.
     update : ChannelUpdate
         The updates to apply to the channel.
+    reason : str | None
+        The reason for editing the channel.
     """
-    channel: discord.abc.GuildChannel | discord.abc.PrivateChannel | discord.Thread = ctx.bot.get_channel(
-        int(channel_id)
-    ) or await ctx.bot.fetch_channel(int(channel_id))
+    channel: ChannelT = ctx.bot.get_channel(int(channel_id)) or await ctx.bot.fetch_channel(int(channel_id))
     if isinstance(channel, (discord.abc.GuildChannel, discord.Thread)):
         params = _process_channel_edit_params(update)
-        await channel.edit(**params)
+        await channel.edit(**params, reason=reason)
         channel = await ctx.bot.fetch_channel(int(channel_id))
         return _discord_channel_to_pydantic(channel)
     raise ValueError("Cannot edit a private channel.")
@@ -95,9 +101,7 @@ async def delete_channel(ctx: DiscordMCPContext, channel_id: str, reason: str | 
     reason : str | None
         The reason for deleting the channel.
     """
-    channel: discord.abc.GuildChannel | discord.abc.PrivateChannel | discord.Thread = ctx.bot.get_channel(
-        int(channel_id)
-    ) or await ctx.bot.fetch_channel(int(channel_id))
+    channel: ChannelT = ctx.bot.get_channel(int(channel_id)) or await ctx.bot.fetch_channel(int(channel_id))
     if isinstance(channel, (discord.abc.GuildChannel, discord.Thread)):
         await channel.delete(reason=reason)
         return CallToolResponse(message=f"Channel {channel_id} deleted.")
@@ -112,6 +116,7 @@ async def edit_channel_permissions(
     target_type: t.Literal["role", "member"],
     allow: PermissionFlags | None = None,
     deny: PermissionFlags | None = None,
+    reason: str | None = None,
 ) -> CallToolResponse:
     """
     Edit the permissions of a channel by its ID.
@@ -130,10 +135,10 @@ async def edit_channel_permissions(
         The permissions to allow.
     deny : PermissionFlags | None
         The permissions to deny.
+    reason : str | None
+        The reason for editing the permissions.
     """
-    channel: discord.abc.GuildChannel | discord.abc.PrivateChannel | discord.Thread = ctx.bot.get_channel(
-        int(channel_id)
-    ) or await ctx.bot.fetch_channel(int(channel_id))
+    channel: ChannelT = ctx.bot.get_channel(int(channel_id)) or await ctx.bot.fetch_channel(int(channel_id))
     if isinstance(channel, discord.abc.GuildChannel):
         guild = channel.guild
         role_or_member: discord.Role | discord.Member | None = None
@@ -148,6 +153,56 @@ async def edit_channel_permissions(
             setattr(overwrite, str(perm), True)
         for perm in deny or []:
             setattr(overwrite, str(perm), False)
-        await channel.set_permissions(role_or_member, overwrite=overwrite)
+        await channel.set_permissions(role_or_member, overwrite=overwrite, reason=reason)
         return CallToolResponse(message=f"Channel {channel_id} permissions updated.")
     raise ValueError("Cannot edit permissions of a private channel.")
+
+
+@channel_manager.register_tool
+async def list_channel_invites(ctx: DiscordMCPContext, channel_id: str) -> list[Invite]:
+    """
+    List the invites for a channel by its ID.
+
+    Parameters
+    ----------
+    ctx : DiscordMCPContext
+        The context of the request.
+    channel_id : str
+        The ID of the channel to list invites for.
+    """
+    channel: ChannelT = ctx.bot.get_channel(int(channel_id)) or await ctx.bot.fetch_channel(int(channel_id))
+    if isinstance(channel, discord.abc.GuildChannel):
+        invites = await channel.invites()
+        return [Invite.from_discord_invite(invite) for invite in invites]
+    raise ValueError("Cannot list invites of a private channel.")
+
+
+@channel_manager.register_tool
+async def create_channel_invite(
+    ctx: DiscordMCPContext, channel_id: str, options: InviteCreationOptions, reason: str | None = None
+) -> Invite:
+    """
+    Create an invite for a channel by its ID.
+
+    Parameters
+    ----------
+    ctx : DiscordMCPContext
+        The context of the request.
+    channel_id : str
+        The ID of the channel to create an invite for.
+    options : InviteCreationOptions
+        The options for creating the invite.
+    reason : str | None
+        The reason for creating the invite.
+    """
+    channel: ChannelT = ctx.bot.get_channel(int(channel_id)) or await ctx.bot.fetch_channel(int(channel_id))
+    if isinstance(channel, discord.abc.GuildChannel):
+        invite = await channel.create_invite(
+            max_age=options.max_age,
+            max_uses=options.max_uses,
+            temporary=options.temporary,
+            unique=options.unique,
+            reason=reason,
+        )
+        return Invite.from_discord_invite(invite)
+    raise ValueError("Cannot create an invite for a private channel.")

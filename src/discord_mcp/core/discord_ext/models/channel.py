@@ -14,6 +14,7 @@ from discord.channel import TextChannel as DiscordTextChannel
 from discord.channel import VoiceChannel as DiscordVoiceChannel
 from discord.threads import Thread as DiscordThreadChannel
 
+from .common import ForumTag
 from .thread import ThreadMember, ThreadMetadata
 from .user import PartialUser
 
@@ -25,6 +26,7 @@ __all__: tuple[str, ...] = (
     "PermissionOverwrite",
     "OverwriteType",
     "ChannelType",
+    "PartialChannel",
     "TextChannel",
     "NewsChannel",
     "VoiceChannel",
@@ -34,7 +36,6 @@ __all__: tuple[str, ...] = (
     "ForumChannel",
     "MediaChannel",
     "DefaultReaction",
-    "ForumTag",
     "DMChannel",
     "GroupChannel",
     "StageInstance",
@@ -96,9 +97,27 @@ class ChannelType(enum.StrEnum):
     PUBLIC_THREAD = "public_thread"
     PRIVATE_THREAD = "private_thread"
     GUILD_STAGE_VOICE = "guild_stage_voice"
-    GUILD_DIRECTORY = "guild_directory"
     GUILD_FORUM = "guild_forum"
     GUILD_MEDIA = "guild_media"
+
+    @classmethod
+    def from_discord_type(cls, channel_type: discord.ChannelType) -> ChannelType:
+        """Convert a discord.ChannelType to a ChannelType."""
+        mapping = {
+            discord.ChannelType.text: cls.GUILD_TEXT,
+            discord.ChannelType.private: cls.DM,
+            discord.ChannelType.voice: cls.GUILD_VOICE,
+            discord.ChannelType.group: cls.GROUP_DM,
+            discord.ChannelType.category: cls.GUILD_CATEGORY,
+            discord.ChannelType.news: cls.GUILD_ANNOUNCEMENT,
+            discord.ChannelType.news_thread: cls.ANNOUNCEMENT_THREAD,
+            discord.ChannelType.public_thread: cls.PUBLIC_THREAD,
+            discord.ChannelType.private_thread: cls.PRIVATE_THREAD,
+            discord.ChannelType.stage_voice: cls.GUILD_STAGE_VOICE,
+            discord.ChannelType.forum: cls.GUILD_FORUM,
+            discord.ChannelType.media: cls.GUILD_MEDIA,
+        }
+        return mapping.get(channel_type, cls.GUILD_TEXT)
 
 
 class PermissionOverwrite(pydantic.BaseModel):
@@ -118,6 +137,17 @@ class BaseChannel(pydantic.BaseModel, t.Generic[BaseChannelT]):
         return cls(
             id=str(channel.id),
             name=getattr(channel, "name", ""),
+        )
+
+
+class PartialChannel(BaseChannel[discord.abc.GuildChannel | discord.Thread]):
+    type: ChannelType = pydantic.Field(description="The type of the channel.")
+
+    @classmethod
+    def from_discord_channel(cls, channel: discord.abc.GuildChannel | discord.Thread) -> PartialChannel:
+        return cls(
+            **BaseChannel.from_discord_channel(channel).model_dump(),
+            type=ChannelType.from_discord_type(channel.type),
         )
 
 
@@ -336,14 +366,6 @@ class DefaultReaction(pydantic.BaseModel):
     emoji_name: str | None = pydantic.Field(default=None, description="The name of the emoji.")
 
 
-class ForumTag(pydantic.BaseModel):
-    id: str = pydantic.Field(description="The unique ID of the tag.")
-    name: str = pydantic.Field(description="The name of the tag.")
-    moderated: bool = pydantic.Field(description="Whether the tag is moderated.")
-    emoji_id: str | None = pydantic.Field(default=None, description="The ID of the emoji for the tag, if custom.")
-    emoji_name: str | None = pydantic.Field(default=None, description="The name of the emoji for the tag.")
-
-
 class BaseForumChannel(BaseTextChannel[DiscordForumChannel]):
     available_tags: list[ForumTag] = pydantic.Field(
         default_factory=list[ForumTag], description="List of available tags for the forum channel."
@@ -366,16 +388,7 @@ class BaseForumChannel(BaseTextChannel[DiscordForumChannel]):
         """Create a BaseForumChannel instance from a discord.ForumChannel object."""
         return cls(
             **BaseTextChannel.from_discord_channel(channel).model_dump(),
-            available_tags=[
-                ForumTag(
-                    id=str(tag.id),
-                    name=tag.name,
-                    moderated=tag.moderated,
-                    emoji_id=str(tag.emoji.id) if tag.emoji and tag.emoji.id else None,
-                    emoji_name=tag.emoji.name if tag.emoji else None,
-                )
-                for tag in channel.available_tags
-            ],
+            available_tags=[ForumTag.from_discord_forum_tag(tag) for tag in channel.available_tags],
             default_reaction_emoji=(
                 DefaultReaction(
                     emoji_id=(
@@ -501,6 +514,21 @@ class StageInstance(pydantic.BaseModel):
     guild_scheduled_event_id: str | None = pydantic.Field(
         default=None, description="The ID of the guild scheduled event associated with this stage instance, if any."
     )
+
+    @classmethod
+    def from_discord_stage_instance(cls, stage_instance: discord.StageInstance) -> StageInstance:
+        """Create a StageInstance instance from a discord.StageInstance object."""
+        return cls(
+            id=str(stage_instance.id),
+            guild_id=str(stage_instance.guild.id),
+            channel_id=str(stage_instance.channel_id),
+            topic=stage_instance.topic,
+            privacy_level=stage_instance.privacy_level.value,
+            discoverable_disabled=stage_instance.discoverable_disabled,
+            guild_scheduled_event_id=(
+                str(stage_instance.scheduled_event_id) if stage_instance.scheduled_event_id else None
+            ),
+        )
 
 
 class BaseChannelUpdate(pydantic.BaseModel):
