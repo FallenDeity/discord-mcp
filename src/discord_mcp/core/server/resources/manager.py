@@ -91,6 +91,7 @@ class DiscordMCPResourceTemplate(ResourceTemplate):
         title: str | None = None,
         description: str | None = None,
         mime_type: str | None = None,
+        icons: list[Icon] | None = None,
         context_kwarg: str | None = None,
     ) -> ResourceTemplate:
         func_name = name or getattr(fn, "__name__", None) or fn.__class__.__name__
@@ -153,6 +154,7 @@ class DiscordMCPResourceTemplate(ResourceTemplate):
             mime_type=mime_type or "text/plain",
             fn=validated_fn,
             parameters=parameters,
+            icons=icons,
             context_kwarg=context_kwarg,
         )
 
@@ -211,6 +213,7 @@ class DiscordMCPResourceManager(ResourceManager):
         title: str | None = None,
         description: str | None = None,
         mime_type: str | None = None,
+        icons: list[Icon] | None = None,
     ) -> ResourceTemplate:
         template = DiscordMCPResourceTemplate.from_function(
             fn,
@@ -219,6 +222,7 @@ class DiscordMCPResourceManager(ResourceManager):
             title=title,
             description=description,
             mime_type=mime_type,
+            icons=icons,
         )
         self._templates[template.uri_template] = template
         return template
