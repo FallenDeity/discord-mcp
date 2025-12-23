@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import typing as t
+from contextlib import asynccontextmanager
 from types import TracebackType
 
 import aiosqlite
@@ -18,13 +19,11 @@ logger = logging.getLogger(__name__)
 
 
 class SQLiteAdapeter(EventStoreAdapter):
-    _db: aiosqlite.Connection
 
     def __init__(self, db: str = "event_store.db") -> None:
         self._db_path = db
 
     async def __aenter__(self) -> SQLiteAdapeter:
-        self._db = await aiosqlite.connect(self._db_path)
         logger.info(f"Connected to SQLite database at {self._db_path}")
         await self.init_schema()
         logger.info("SQLite database schema initialized.")
@@ -36,40 +35,46 @@ class SQLiteAdapeter(EventStoreAdapter):
         exc_value: t.Optional[BaseException],
         traceback: t.Optional[TracebackType],
     ) -> None:
-        if self._db:
-            await self._db.close()
-        logger.info("Closed SQLite database connection.")
+        logger.info("SQLiteAdapter cleanup complete.")
 
-    async def init_schema(self) -> None:
-        async with self._db.cursor() as cursor:
+    async def init_schema(self) -> None:  # type: ignore
+        async with self.get_cursor() as cursor:
             await cursor.execute(
                 """
                 CREATE TABLE IF NOT EXISTS events (
                     id TEXT PRIMARY KEY,
                     stream_id TEXT NOT NULL,
-                    message TEXT NOT NULL,
+                    message TEXT NULL,
                     created_at TIMESTAMP NOT NULL
                 )
                 """
             )
-            await self._db.commit()
+
+    @asynccontextmanager
+    async def get_cursor(self) -> t.AsyncGenerator[aiosqlite.Cursor, None]:
+        async with aiosqlite.connect(self._db_path) as db:
+            async with db.cursor() as cursor:
+                yield cursor
+            await db.commit()
 
     async def insert_event(self, event: EventRecord) -> None:
-        logger.debug(f"Inserting event: {event.event_id} into stream: {event.stream_id}")
-        async with self._db.cursor() as cursor:
+        async with self.get_cursor() as cursor:
+            message_json = event.message.model_dump_json() if event.message is not None else None
+            print(
+                f"message_json: {message_json}, type: {type(message_json)}, event_id: {event.event_id}, stream_id: {event.stream_id}, created_at: {event.created_at}"
+            )
             await cursor.execute(
                 """
                 INSERT INTO events (id, stream_id, message, created_at)
                 VALUES (?, ?, ?, ?)
                 """,
-                (event.event_id, event.stream_id, event.message.model_dump_json(), event.created_at),
+                (event.event_id, event.stream_id, message_json, event.created_at),
             )
-            await self._db.commit()
-            logger.info(f"Event {event.event_id} inserted successfully.")
+        logger.info(f"Event {event.event_id} inserted successfully.")
 
     async def get_event(self, event_id: EventId) -> EventRecord | None:
-        logger.debug(f"Retrieving event with ID: {event_id}.")
-        async with self._db.cursor() as cursor:
+        async with self.get_cursor() as cursor:
+            logger.debug(f"Retrieving event with ID: {event_id}.")
             await cursor.execute(
                 "SELECT id, stream_id, message, created_at FROM events WHERE id = ?",
                 (event_id,),
@@ -93,7 +98,7 @@ class SQLiteAdapeter(EventStoreAdapter):
         if not last_event:
             logger.warning(f"Event {after_event_id} not found, returning empty list.")
             return []
-        async with self._db.cursor() as cursor:
+        async with self.get_cursor() as cursor:
             await cursor.execute(
                 """
                 SELECT id, stream_id, message, created_at

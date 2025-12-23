@@ -42,7 +42,8 @@ def add_description_to_annotation(ann: t.Any, default: t.Any, description: str) 
         for e in extras:
             if isinstance(e, pydantic.fields.FieldInfo):
                 new_extras.append(
-                    pydantic.fields.FieldInfo.merge_field_infos(e, pydantic.Field(description=description))
+                    # TODO: merge_field_infos is deprecated, replace with a suitable alternative when available
+                    pydantic.fields.FieldInfo.merge_field_infos(e, pydantic.Field(description=description))  # type: ignore
                 )
                 field_found = True
             else:
@@ -55,7 +56,7 @@ def add_description_to_annotation(ann: t.Any, default: t.Any, description: str) 
 
     # Case 2: Default is Field(...)
     if isinstance(default, pydantic.fields.FieldInfo):
-        return ann, pydantic.fields.FieldInfo.merge_field_infos(default, pydantic.Field(description=description))
+        return ann, pydantic.fields.FieldInfo.merge_field_infos(default, pydantic.Field(description=description))  # type: ignore
 
     # Case 3: No Field, wrap in Annotated
     return t.Annotated[ann, pydantic.Field(description=description)], default

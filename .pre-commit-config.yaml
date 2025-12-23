@@ -25,23 +25,23 @@ repos:
           - id: isort
             name: isort
             pass_filenames: false
-            entry: poetry run isort .
+            entry: uv run isort .
             language: system
 
           - id: black
             name: black
             pass_filenames: false
-            entry: poetry run black .
+            entry: uv run black .
             language: system
 
           - id: pyright
             name: pyright
             pass_filenames: false
-            entry: poetry run pyright .
+            entry: uv run pyright .
             language: system
 
           - id: ruff
             name: ruff
             pass_filenames: false
-            entry: poetry run ruff check .
+            entry: uv run ruff check .
             language: system

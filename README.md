@@ -21,7 +21,7 @@ code $env:APPDATA\Claude\claude_desktop_config.json
 {
     "mcpServers": {
         "discord": {
-            "command": "poetry",
+            "command": "uv",
             "args": [
                 "--directory",
                 "C:\\Users\\<username>\\<projects_directory>\\discord-mcp",
@@ -39,7 +39,7 @@ code $env:APPDATA\Claude\claude_desktop_config.json
 ```
 
 ```
-poetry --directory "C:\\Users\\<username>\\<projects_directory>\\discord-mcp" run python -m discord_mcp --file-logging --server-type STIO
+uv --directory "C:\\Users\\<username>\\<projects_directory>\\discord-mcp" run python -m discord_mcp --file-logging --server-type STIO
 ```
 
 ### HTTP Server
@@ -55,7 +55,7 @@ Remote connectors are a `Pro and Max plans` feature. To use the remote connector
 Use this command in the inspector tool sidebar:
 
 ```pwsh
-poetry --directory "C:\\Users\\<username>\\<projects_directory>\\discord-mcp" run python -m discord_mcp --file-logging --server-type STDIO
+uv --directory "C:\\Users\\<username>\\<projects_directory>\\discord-mcp" run python -m discord_mcp --file-logging --server-type STDIO
 ```
 
 ### HTTP Server
@@ -63,7 +63,7 @@ poetry --directory "C:\\Users\\<username>\\<projects_directory>\\discord-mcp" ru
 First run the server using:
 
 ```pwsh
-poetry --directory "C:\\Users\\<username>\\<projects_directory>\\discord-mcp" run python -m discord_mcp --file-logging --server-type HTTP
+uv --directory "C:\\Users\\<username>\\<projects_directory>\\discord-mcp" run python -m discord_mcp --file-logging --server-type HTTP
 ```
 
 Then, in the inspector tool, you can connect to the server by entering the URL:
