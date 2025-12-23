@@ -8,7 +8,7 @@ import typing as t
 import pydantic_core
 from mcp.server.fastmcp.resources import FunctionResource, ResourceManager, ResourceTemplate
 from mcp.server.fastmcp.resources.base import Resource
-from mcp.types import Icon
+from mcp.types import Annotations, Icon
 from pydantic import AnyUrl
 
 from discord_mcp.core.server.shared.context import DiscordMCPContext, get_context
@@ -61,6 +61,7 @@ class DiscordMCPFunctionResource(FunctionResource):
         description: str | None = None,
         mime_type: str | None = None,
         icons: list[Icon] | None = None,
+        annotations: Annotations | None = None,
     ) -> "FunctionResource":
         """Create a FunctionResource from a function."""
         func_name = name or fn.__name__
@@ -78,6 +79,7 @@ class DiscordMCPFunctionResource(FunctionResource):
             mime_type=mime_type or "text/plain",
             fn=validated_fn,
             icons=icons,
+            annotations=annotations,
         )
 
 
@@ -92,6 +94,7 @@ class DiscordMCPResourceTemplate(ResourceTemplate):
         description: str | None = None,
         mime_type: str | None = None,
         icons: list[Icon] | None = None,
+        annotations: Annotations | None = None,
         context_kwarg: str | None = None,
     ) -> ResourceTemplate:
         func_name = name or getattr(fn, "__name__", None) or fn.__class__.__name__
@@ -156,6 +159,7 @@ class DiscordMCPResourceTemplate(ResourceTemplate):
             parameters=parameters,
             icons=icons,
             context_kwarg=context_kwarg,
+            annotations=annotations,
         )
 
     async def create_resource(
@@ -214,6 +218,7 @@ class DiscordMCPResourceManager(ResourceManager):
         description: str | None = None,
         mime_type: str | None = None,
         icons: list[Icon] | None = None,
+        annotations: Annotations | None = None,
     ) -> ResourceTemplate:
         template = DiscordMCPResourceTemplate.from_function(
             fn,
@@ -223,6 +228,7 @@ class DiscordMCPResourceManager(ResourceManager):
             description=description,
             mime_type=mime_type,
             icons=icons,
+            annotations=annotations,
         )
         self._templates[template.uri_template] = template
         return template

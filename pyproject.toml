@@ -1,36 +1,48 @@
-[tool.poetry]
+[project]
 name = "discord-mcp"
 version = "0.1.0"
 description = ""
-authors = ["FallenDeity <61227305+FallenDeity@users.noreply.github.com>", "Snipy7374 <100313469+Snipy7374@users.noreply.github.com>"]
+authors = [
+    { name = "FallenDeity", email = "61227305+FallenDeity@users.noreply.github.com" },
+    { name = "Snipy7374", email = "100313469+Snipy7374@users.noreply.github.com" },
+]
+requires-python = ">=3.12,<4"
 readme = "README.md"
-package-mode = true
-packages = [
-    { include = "discord_mcp", from = "src" }
+dependencies = [
+    "pytest>=8.4.1,<9",
+    "click>=8.2.1,<9",
+    "discord-py>=2.5.2,<3",
+    "python-dotenv>=1.1.1,<2",
+    "docstring-parser>=0.17.0,<0.18",
+    "aiosqlite>=0.21.0,<0.22",
+    "mcp>=1.25.0",
 ]
 
-[tool.poetry.dependencies]
-python = "^3.12"
-pytest = "^8.4.1"
-click = "^8.2.1"
-mcp = "^1.12.1"
-discord-py = "^2.5.2"
-python-dotenv = "^1.1.1"
-docstring-parser = "^0.17.0"
-aiosqlite = "^0.21.0"
+[dependency-groups]
+dev = [
+    "isort>=6.0.1,<7",
+    "black>=25.1.0,<26",
+    "pre-commit>=4.2.0,<5",
+    "pyright>=1.1.403,<2",
+    "ruff>=0.12.4,<0.13",
+    "pytest>=8.4.1,<9",
+]
 
+[tool.uv]
+package = true
 
-[tool.poetry.group.dev.dependencies]
-isort = "^6.0.1"
-black = "^25.1.0"
-pre-commit = "^4.2.0"
-pyright = "^1.1.403"
-ruff = "^0.12.4"
-pytest = "^8.4.1"
+[tool.hatch.build.targets.sdist]
+include = ["src/discord_mcp"]
+
+[tool.hatch.build.targets.wheel]
+include = ["src/discord_mcp"]
+
+[tool.hatch.build.targets.wheel.sources]
+"src/discord_mcp" = "discord_mcp"
 
 [build-system]
-requires = ["poetry-core"]
-build-backend = "poetry.core.masonry.api"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
 [tool.ruff]
 target-version = "py312"

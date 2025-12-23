@@ -63,7 +63,7 @@ class LoggingMiddleware(Middleware):
             "method": ctx.method,
             "event_type": ctx.event_type,
             "timestamp": ctx.timestamp.isoformat(),
-            "payload": pydantic_core.to_jsonable_python(ctx.message),
+            # "payload": pydantic_core.to_jsonable_python(ctx.message),
         }
 
         with add_to_log_context(**request_data):
@@ -75,7 +75,10 @@ class LoggingMiddleware(Middleware):
                 raise error from e
 
             duration = (time.perf_counter() - start_time) * 1000  # Convert to milliseconds
-            response_data = {"result": pydantic_core.to_jsonable_python(response), "duration": f"{duration:.2f}ms"}
+            response_data = {
+                "result": None,
+                "duration": f"{duration:.2f}ms",
+            }  # pydantic_core.to_jsonable_python(response)
             logger.info(
                 "Request completed" if ctx.event_type == MiddlewareEventTypes.REQUEST else "Notification processed",
                 extra=response_data,

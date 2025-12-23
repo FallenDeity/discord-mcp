@@ -42,7 +42,8 @@ def add_description_to_annotation(ann: t.Any, default: t.Any, description: str) 
         for e in extras:
             if isinstance(e, pydantic.fields.FieldInfo):
                 new_extras.append(
-                    pydantic.fields.FieldInfo.merge_field_infos(e, pydantic.Field(description=description))
+                    # TODO: merge_field_infos is deprecated, replace with a suitable alternative when available
+                    pydantic.fields.FieldInfo.merge_field_infos(e, pydantic.Field(description=description))  # type: ignore
                 )
                 field_found = True
             else:
@@ -55,7 +56,7 @@ def add_description_to_annotation(ann: t.Any, default: t.Any, description: str) 
 
     # Case 2: Default is Field(...)
     if isinstance(default, pydantic.fields.FieldInfo):
-        return ann, pydantic.fields.FieldInfo.merge_field_infos(default, pydantic.Field(description=description))
+        return ann, pydantic.fields.FieldInfo.merge_field_infos(default, pydantic.Field(description=description))  # type: ignore
 
     # Case 3: No Field, wrap in Annotated
     return t.Annotated[ann, pydantic.Field(description=description)], default
@@ -107,7 +108,6 @@ def transform_function_signature(fn: t.Callable[..., t.Any]) -> t.Callable[..., 
 
 
 def extract_mime_type_from_fn_return(fn: t.Callable[..., t.Any]) -> str:
-    sig = inspect.signature(fn)
     return_annotation = t.get_type_hints(fn, include_extras=True).get("return", inspect._empty)
     r_type = (
         return_annotation
@@ -128,7 +128,7 @@ def extract_mime_type_from_fn_return(fn: t.Callable[..., t.Any]) -> str:
             if issubclass(r_type, ResourceReturnType.PYDANTIC_BASE_MODEL.value):
                 return "application/json"
 
-            name = getattr(sig.return_annotation, "__name__", sig.return_annotation.__class__.__name__)
+            name = getattr(r_type, "__name__", str(r_type))
             raise RuntimeError(
                 f"Resources return type must be `str`, `bytes`, `list`, `dict`, `None` or a pydantic `BaseModel` subclasss, got {name!r}"
             )

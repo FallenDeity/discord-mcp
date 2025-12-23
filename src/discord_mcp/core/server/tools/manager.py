@@ -43,6 +43,7 @@ class DiscordMCPToolManager(ToolManager):
         description: str | None = None,
         annotations: ToolAnnotations | None = None,
         icons: list[Icon] | None = None,
+        meta: dict[str, t.Any] | None = None,
         structured_output: bool | None = None,
     ) -> Tool:
         tool = DiscordMCPTool.from_function(
@@ -52,6 +53,7 @@ class DiscordMCPToolManager(ToolManager):
             description=description,
             annotations=annotations,
             icons=icons,
+            meta=meta,
             structured_output=structured_output,
         )
         existing = self._tools.get(tool.name)

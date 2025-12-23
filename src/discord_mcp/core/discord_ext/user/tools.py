@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import typing as t
 
 from mcp.types import CallToolRequest
@@ -19,14 +17,14 @@ user_tools_manager = DiscordMCPPluginManager(name="user-tools")
 
 
 # NOTE: These are just some basic checks for testing purposes
-def has_bot_user(ctx: MiddlewareContext[CallToolRequest]) -> bool:
+def has_bot_user(ctx: "MiddlewareContext[CallToolRequest]") -> bool:
     return ctx.context.bot.user is not None
 
 
 def is_bot_id(bot_id: int):
     original = user_tools_manager.check(has_bot_user).__predicate__
 
-    async def extended_check(ctx: MiddlewareContext[CallToolRequest]):
+    async def extended_check(ctx: "MiddlewareContext[CallToolRequest]"):
         return await original(ctx) and ctx.context.bot.user.id == bot_id  # type: ignore Already verified in check
 
     return user_tools_manager.check(extended_check)
@@ -57,7 +55,7 @@ async def get_user_resource(ctx: DiscordMCPContext, user_id: str) -> DiscordUser
 
 @get_user_resource.autocomplete("user_id")
 async def autocomplete_user_id(
-    ctx: DiscordMCPContext, ref: DiscordMCPResourceTemplate, query: str, context_args: dict[str, t.Any] | None = None
+    ctx: DiscordMCPContext, ref: "DiscordMCPResourceTemplate", query: str, context_args: dict[str, t.Any] | None = None
 ) -> list[str]:
     """Autocomplete user IDs."""
     if not query:

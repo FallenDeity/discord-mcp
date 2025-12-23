@@ -11,7 +11,7 @@ __all__: tuple[str, ...] = ("EventRecord",)
 @attrs.define
 class EventRecord:
     stream_id: StreamId
-    message: JSONRPCMessage
+    message: JSONRPCMessage | None
     event_id: EventId = attrs.field(factory=lambda: str(uuid.uuid4()))
     created_at: datetime.datetime = attrs.field(
         factory=lambda: datetime.datetime.now(datetime.timezone.utc),
