@@ -3,8 +3,8 @@ from __future__ import annotations
 import logging
 import typing as t
 
-from mcp.server.fastmcp.tools import Tool, ToolManager
-from mcp.types import ToolAnnotations
+from mcp.server.mcpserver.tools import Tool, ToolManager
+from mcp.types import ToolAnnotations, Icon
 
 from discord_mcp.core.server.shared.context import DiscordMCPContext
 from discord_mcp.utils.checks import find_kwarg_by_type
@@ -42,6 +42,8 @@ class DiscordMCPToolManager(ToolManager):
         title: str | None = None,
         description: str | None = None,
         annotations: ToolAnnotations | None = None,
+        icons: list[Icon] | None = None,
+        meta: dict[str, t.Any] | None = None,
         structured_output: bool | None = None,
     ) -> Tool:
         tool = DiscordMCPTool.from_function(

@@ -6,7 +6,7 @@ import time
 import typing as t
 
 import pydantic_core
-from mcp.shared.exceptions import McpError
+from mcp.shared.exceptions import MCPError
 from mcp.types import Notification, Request, Result
 
 from discord_mcp.utils.enums import MiddlewareEventTypes
@@ -32,8 +32,8 @@ __all__: tuple[str, ...] = ("LoggingMiddleware",)
 class LoggingMiddleware(Middleware):
     def _process_exception(
         self, ctx: MiddlewareContext[Request[t.Any, t.Any] | Notification[t.Any, t.Any]], exception: Exception
-    ) -> McpError:
-        if isinstance(exception, McpError):
+    ) -> MCPError:
+        if isinstance(exception, MCPError):
             return exception
 
         base_message = f"Unhandled exception in {ctx.event_type}:{ctx.method}"

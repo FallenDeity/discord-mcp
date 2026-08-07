@@ -6,14 +6,18 @@ import re
 import typing as t
 
 import pydantic_core
-from mcp.server.fastmcp.resources import FunctionResource, ResourceManager, ResourceTemplate
-from mcp.server.fastmcp.resources.base import Resource
+from mcp.server.mcpserver.resources import FunctionResource, ResourceManager, ResourceTemplate, ResourceSecurity, DEFAULT_RESOURCE_SECURITY
+from mcp.server.mcpserver.resources.base import Resource
+from mcp.server.mcpserver.server import Context
 from pydantic import AnyUrl
 
 from discord_mcp.core.server.shared.context import DiscordMCPContext, get_context
 from discord_mcp.utils.checks import context_safe_validate_call, find_kwarg_by_type
 from discord_mcp.utils.converters import get_cached_typeadapter, process_callable_result, prune_param
 from discord_mcp.utils.exceptions import ResourceReadError
+
+if t.TYPE_CHECKING:
+    from mcp.types import Icon, Annotations, InputRequiredResult
 
 __all__: tuple[str, ...] = (
     "DiscordMCPResourceManager",
@@ -53,6 +57,9 @@ class DiscordMCPFunctionResource(FunctionResource):
         title: str | None = None,
         description: str | None = None,
         mime_type: str | None = None,
+        icons: list[Icon] | None = None,
+        annotations: Annotations | None = None,
+        meta: dict[str, t.Any] | None = None,
     ) -> "FunctionResource":
         """Create a FunctionResource from a function."""
         func_name = name or fn.__name__
@@ -63,12 +70,15 @@ class DiscordMCPFunctionResource(FunctionResource):
         validated_fn = context_safe_validate_call(fn)
 
         return cls(
-            uri=AnyUrl(uri),
+            uri=uri,
             name=func_name,
             title=title,
             description=description or fn.__doc__ or "",
             mime_type=mime_type or "text/plain",
             fn=validated_fn,
+            icons=icons,
+            annotations=annotations,
+            meta=meta,
         )
 
 
@@ -82,6 +92,11 @@ class DiscordMCPResourceTemplate(ResourceTemplate):
         title: str | None = None,
         description: str | None = None,
         mime_type: str | None = None,
+        icons: list[Icon] | None = None,
+        annotations: Annotations | None = None,
+        meta: dict[str, t.Any] | None = None,
+        context_kwarg: str | None = None,
+        security: ResourceSecurity = DEFAULT_RESOURCE_SECURITY,
     ) -> ResourceTemplate:
         func_name = name or getattr(fn, "__name__", None) or fn.__class__.__name__
         if func_name == "<lambda>":
@@ -143,9 +158,14 @@ class DiscordMCPResourceTemplate(ResourceTemplate):
             mime_type=mime_type or "text/plain",
             fn=validated_fn,
             parameters=parameters,
+            icons=icons,
+            annotations=annotations,
+            meta=meta,
+            context_kwarg=context_kwarg,
+            security=security,
         )
 
-    async def create_resource(self, uri: str, params: dict[str, t.Any]) -> Resource:
+    async def create_resource(self, uri: str, params: dict[str, t.Any], context: Context,) -> Resource:
         try:
             # First layer calls a dummy function to ensure, input validation is done,
             # and then calls the actual function with the context if requirements meet
@@ -164,7 +184,7 @@ class DiscordMCPResourceTemplate(ResourceTemplate):
 
 
 class DiscordMCPResourceManager(ResourceManager):
-    async def get_resource(self, uri: AnyUrl | str) -> Resource | None:
+    async def get_resource(self, uri: AnyUrl | str, context: Context) -> Resource | InputRequiredResult:
         """Get resource by URI, checking concrete resources first, then templates."""
         uri_str = str(uri)
         logger.debug("Getting resource", extra={"uri": uri_str})
@@ -179,7 +199,7 @@ class DiscordMCPResourceManager(ResourceManager):
                 try:
                     context_kwarg = find_kwarg_by_type(template.fn, DiscordMCPContext)
                     params |= {context_kwarg: get_context()} if context_kwarg else {}
-                    return await template.create_resource(uri_str, params)
+                    return await template.create_resource(uri_str, params, context)
                 except Exception as e:
                     raise ValueError(f"Error creating resource from template: {e}")
 
@@ -193,6 +213,10 @@ class DiscordMCPResourceManager(ResourceManager):
         title: str | None = None,
         description: str | None = None,
         mime_type: str | None = None,
+        icons: list[Icon] | None = None,
+        annotations: Annotations | None = None,
+        meta: dict[str, t.Any] | None = None,
+        security: ResourceSecurity = DEFAULT_RESOURCE_SECURITY,
     ) -> ResourceTemplate:
         template = DiscordMCPResourceTemplate.from_function(
             fn,
@@ -201,6 +225,10 @@ class DiscordMCPResourceManager(ResourceManager):
             title=title,
             description=description,
             mime_type=mime_type,
+            icons=icons,
+            annotations=annotations,
+            meta=meta,
+            security=security,
         )
         self._templates[template.uri_template] = template
         return template

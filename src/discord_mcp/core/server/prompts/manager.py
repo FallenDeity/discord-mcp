@@ -4,8 +4,9 @@ import logging
 import typing as t
 
 import pydantic_core
-from mcp.server.fastmcp.prompts import Prompt, PromptManager
-from mcp.server.fastmcp.prompts.base import Message, PromptArgument, PromptResult, UserMessage, message_validator
+from mcp.server.mcpserver.server import Context
+from mcp.server.mcpserver.prompts import Prompt, PromptManager
+from mcp.server.mcpserver.prompts.base import Message, PromptArgument, PromptResult, UserMessage, message_validator
 from mcp.types import TextContent
 
 from discord_mcp.core.server.shared.context import DiscordMCPContext, get_context
@@ -19,6 +20,9 @@ from discord_mcp.utils.converters import (
     transform_function_signature,
 )
 from discord_mcp.utils.exceptions import PromptRenderError
+
+if t.TYPE_CHECKING:
+    from mcp.types import Icon
 
 __all__: tuple[str, ...] = (
     "DiscordMCPPromptManager",
@@ -37,6 +41,8 @@ class DiscordMCPPrompt(Prompt):
         name: str | None = None,
         title: str | None = None,
         description: str | None = None,
+        icons: list[Icon] | None = None,
+        context_kwarg: str | None = None,
     ) -> DiscordMCPPrompt:
         """Create a Prompt from a function.
 
@@ -81,9 +87,11 @@ class DiscordMCPPrompt(Prompt):
             description=description or fn.__doc__ or "",
             arguments=arguments,
             fn=validated_fn,
+            icons=icons,
+            context_kwarg=context_kwarg,
         )
 
-    async def render(self, arguments: dict[str, t.Any] | None = None) -> list[Message]:
+    async def render(self, arguments: dict[str, t.Any] | None, context: Context) -> list[Message]:
         """Render the prompt with arguments."""
         # Validate required arguments
         arguments = arguments or {}

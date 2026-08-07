@@ -101,10 +101,10 @@ class AutocompleteHandler(t.Generic[T, RefT]):
         mcp_context: DiscordMCPContext,
     ) -> T:
         if isinstance(reference, PromptReference):
-            return t.cast(DiscordMCPPrompt, mcp_context.mcp_server._prompt_manager._prompts[reference.name])  # type: ignore
+            return t.cast(DiscordMCPPrompt, mcp_context.mcp_server._prompt_manager._prompts[reference.name])
         else:
             return t.cast(
-                DiscordMCPResourceTemplate, mcp_context.mcp_server._resource_manager._templates[reference.uri]  # type: ignore
+                DiscordMCPResourceTemplate, mcp_context.mcp_server._resource_manager._templates[reference.uri]
             )
 
     async def __call__(

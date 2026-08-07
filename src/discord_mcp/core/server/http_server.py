@@ -7,7 +7,6 @@ import uvicorn
 from mcp.server.fastmcp.server import StreamableHTTPASGIApp
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
 from starlette.applications import Starlette
-from starlette.requests import Request
 from starlette.routing import Mount
 
 from discord_mcp.core.discord_ext.bot import DiscordMCPBot
@@ -40,7 +39,7 @@ class DiscordMCPStarletteApp(Starlette):
         super().__init__(*args, **kwargs, lifespan=starlette_lifespan)
 
 
-class HTTPDiscordMCPServer(BaseDiscordMCPServer[Request]):
+class HTTPDiscordMCPServer(BaseDiscordMCPServer):
     @property
     def streamable_http_app(self) -> Starlette:
         # TODO: Make this configurable from cli

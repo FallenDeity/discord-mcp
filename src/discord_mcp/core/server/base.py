@@ -14,19 +14,18 @@ import anyio
 import mcp.types as types
 import pydantic_core
 from anyio.streams.memory import MemoryObjectReceiveStream, MemoryObjectSendStream
-from mcp.server.fastmcp.resources import Resource
-from mcp.server.fastmcp.server import Settings
+from mcp.server.mcpserver.resources import Resource
+from mcp.server.mcpserver.server import Settings
 from mcp.server.lowlevel import Server
 from mcp.server.lowlevel.helper_types import ReadResourceContents
 from mcp.server.lowlevel.server import request_ctx
 from mcp.server.models import InitializationOptions
 from mcp.server.session import ServerSession
-from mcp.shared.context import RequestContext
-from mcp.shared.exceptions import McpError
+from mcp.server.context import ServerRequestContext
+from mcp.shared.exceptions import MCPError
 from mcp.shared.message import ClientMessageMetadata, ServerMessageMetadata, SessionMessage
 from mcp.shared.session import RequestResponder
 from mcp.types import (
-    AnyFunction,
     Completion,
     CompletionArgument,
     CompletionContext,
@@ -93,14 +92,13 @@ __all__: tuple[str, ...] = ("BaseDiscordMCPServer",)
 
 PLUGINS_PATH = pathlib.Path(__file__).parent.parent / "discord_ext"
 
-
-RequestT = t.TypeVar("RequestT", bound=t.Any)
+AnyFunction = t.Callable[..., t.Any]
 
 
 logger = logging.getLogger(__name__)
 
 
-class BaseDiscordMCPServer(Server[DiscordMCPLifespanResult, RequestT]):
+class BaseDiscordMCPServer(Server[DiscordMCPLifespanResult]):
     def __init__(
         self,
         *args: t.Any,
@@ -648,16 +646,18 @@ class BaseDiscordMCPServer(Server[DiscordMCPLifespanResult, RequestT]):
                 # Set our global state that can be retrieved via
                 # app.get_request_context()
                 token = request_ctx.set(
-                    RequestContext(
-                        message.request_id,
-                        message.request_meta,
-                        session,
-                        lifespan_context or (request_data.state if request_data else None),
+                    ServerRequestContext(
+                        request_id=message.request_id,
+                        meta=message.request_meta,
+                        session=session,
+                        lifespan_context=lifespan_context or (request_data.state if request_data else None),
                         request=request_data,
+                        protocol_version="2",
+                        method=""
                     )
                 )
                 response = await chain(req)
-            except McpError as err:
+            except MCPError as err:
                 response = err.error
             except anyio.get_cancelled_exc_class():
                 logger.info(
@@ -713,7 +713,7 @@ class BaseDiscordMCPServer(Server[DiscordMCPLifespanResult, RequestT]):
                 request_id = req.related_request_id
 
             token = request_ctx.set(
-                RequestContext(
+                ServerRequestContext(
                     request_id or -1,  # Use -1 if no request_id is available
                     None,
                     session,

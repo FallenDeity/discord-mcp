@@ -7,11 +7,9 @@ import logging
 import typing as t
 
 import attrs
-from mcp.server.fastmcp.server import Context, FastMCP
+from mcp.server.mcpserver.server import Context, MCPServer
 from mcp.server.lowlevel.helper_types import ReadResourceContents
-from mcp.server.lowlevel.server import request_ctx
-from mcp.server.session import ServerSession
-from mcp.shared.context import RequestContext
+from mcp.server.context import ServerRequestContext
 from pydantic import AnyUrl
 from typing_extensions import TypeVar
 
@@ -21,7 +19,7 @@ if t.TYPE_CHECKING:
     from discord_mcp.core.server.http_server import DiscordMCPStarletteApp
     from discord_mcp.core.server.stdio_server import STDIODiscordMCPServer
 
-    ServerT = TypeVar("ServerT", bound=BaseDiscordMCPServer[t.Any], default=BaseDiscordMCPServer[t.Any])
+    ServerT = TypeVar("ServerT", bound=BaseDiscordMCPServer, default=BaseDiscordMCPServer)
 else:
     # to avoid importing BaseDiscordMCPServer at runtime causing circular imports errors
     ServerT = TypeVar("ServerT")
@@ -51,15 +49,15 @@ class DiscordMCPLifespanResult(t.Generic[ServerT], collections.UserDict[str, t.A
         return f"{self.__class__.__name__}(data={self.data})"
 
 
-class DiscordMCPContext(Context[ServerSession, DiscordMCPLifespanResult[ServerT], t.Any]):
+class DiscordMCPContext(Context[DiscordMCPLifespanResult[ServerT], t.Any]):
     def __init__(
         self,
         *,
-        request_context: RequestContext[ServerSession, t.Any, t.Any] | None,
-        fastmcp: FastMCP | None,
+        request_context: ServerRequestContext[t.Any, t.Any] | None,
+        mcp_server: MCPServer | None,
         **kwargs: t.Any,
     ) -> None:
-        super().__init__(request_context=request_context, fastmcp=fastmcp, **kwargs)
+        super().__init__(request_context=request_context, mcp_server=mcp_server, **kwargs)
 
     @property
     def bot(self) -> DiscordMCPBot:
@@ -67,7 +65,7 @@ class DiscordMCPContext(Context[ServerSession, DiscordMCPLifespanResult[ServerT]
         return self.request_context.lifespan_context.bot
 
     @property
-    def mcp_server(self) -> ServerT:
+    def mcp_server(self) -> ServerT:  # type: ignore
         """Returns :class:`BaseDiscordMCPServer`: a shortcut property, this is equivalent to `DiscordMCPContext.request_context.lifespan_context.mcp_server`."""
         return self.request_context.lifespan_context.mcp_server
 
@@ -77,8 +75,8 @@ class DiscordMCPContext(Context[ServerSession, DiscordMCPLifespanResult[ServerT]
 
 @contextlib.asynccontextmanager
 async def _manage_bot_lifecycle(
-    bot: DiscordMCPBot, mcp_server: BaseDiscordMCPServer[t.Any]
-) -> t.AsyncIterator[DiscordMCPLifespanResult[BaseDiscordMCPServer[t.Any]]]:
+    bot: DiscordMCPBot, mcp_server: BaseDiscordMCPServer
+) -> t.AsyncIterator[DiscordMCPLifespanResult[BaseDiscordMCPServer]]:
     """Common bot lifecycle management for both server types."""
     await bot.login(str(bot.environment.DISCORD_TOKEN))
     _bot_task = asyncio.create_task(bot.connect())
@@ -108,7 +106,7 @@ async def _manage_bot_lifecycle(
 @contextlib.asynccontextmanager
 async def starlette_lifespan(
     app: DiscordMCPStarletteApp,
-) -> t.AsyncIterator[DiscordMCPLifespanResult[BaseDiscordMCPServer[t.Any]]]:
+) -> t.AsyncIterator[DiscordMCPLifespanResult[BaseDiscordMCPServer]]:
     if not app.session_manager:
         raise RuntimeError("Session manager is not initialized, cannot run lifespan context")
 
@@ -122,15 +120,11 @@ async def starlette_lifespan(
 @contextlib.asynccontextmanager
 async def stdio_lifespan(
     app: STDIODiscordMCPServer,
-) -> t.AsyncIterator[DiscordMCPLifespanResult[BaseDiscordMCPServer[t.Any]]]:
+) -> t.AsyncIterator[DiscordMCPLifespanResult[BaseDiscordMCPServer]]:
     async with _manage_bot_lifecycle(app.bot, mcp_server=app) as result:
         yield result
         logger.info("Application shutting down...")
 
 
 def get_context() -> DiscordMCPContext:
-    try:
-        request_context = request_ctx.get()
-    except LookupError:
-        request_context = None
-    return DiscordMCPContext(request_context=request_context, fastmcp=None)
+    return DiscordMCPContext(request_context=None, mcp_server=None)

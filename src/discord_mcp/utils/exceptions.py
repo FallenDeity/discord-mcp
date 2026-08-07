@@ -3,7 +3,7 @@ import sys
 import typing as t
 from types import TracebackType
 
-from mcp.shared.exceptions import McpError
+from mcp.shared.exceptions import MCPError
 from mcp.types import ErrorData
 
 from discord_mcp.utils.enums import ErrorCodes
@@ -40,12 +40,11 @@ def handle_exception(exc_type: type[BaseException], exc_value: BaseException, ex
     logger.critical("Uncaught exception", exc_info=(exc_type, exc_value, exc_traceback))
 
 
-class BaseMcpError(McpError):
+class BaseMcpError(MCPError):
     """Base class for MCP-related errors."""
 
     def __init__(self, error: ErrorData):
-        super().__init__(error)
-        self.data = error.data
+        super().__init__(code=error.code, message=error.message, data=error.data)
 
 
 class ParseError(BaseMcpError):

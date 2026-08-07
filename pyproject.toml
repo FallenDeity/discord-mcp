@@ -10,11 +10,11 @@ packages = [
 ]
 
 [tool.poetry.dependencies]
-python = "^3.12"
+python = "^3.14"
 pytest = "^8.4.1"
 click = "^8.2.1"
-mcp = "^1.12.1"
-discord-py = "^2.5.2"
+mcp = "^2.0.0"
+discord-py = "^2.7.1"
 python-dotenv = "^1.1.1"
 docstring-parser = "^0.17.0"
 aiosqlite = "^0.21.0"
